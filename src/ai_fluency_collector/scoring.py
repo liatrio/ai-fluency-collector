@@ -20,7 +20,6 @@ ARTIFACT_SKILL_MAPPINGS: list[dict] = [
     {"artifact_id": "aider", "skill_id": "im-chat", "weight": 0.5},
 ]
 
-# CI pattern → skill mappings (added in Task 3.0)
 # CI pattern → skill mappings
 CI_SKILL_MAPPINGS: list[dict] = [
     {"artifact_id": "sast-dast", "skill_id": "sdlc-security", "weight": 0.4},

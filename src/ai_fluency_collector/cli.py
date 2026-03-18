@@ -8,6 +8,7 @@ import click
 
 from ai_fluency_collector.config import load_config
 from ai_fluency_collector.gitlab_client import GitLabAccessError, GitLabAuthError, GitLabClient
+from ai_fluency_collector.output import build_output, write_output
 from ai_fluency_collector.scanners.artifact_scanner import ARTIFACT_DEFINITIONS, ArtifactScanner
 from ai_fluency_collector.scanners.ci_scanner import CI_PATTERN_IDS, CIScanner
 from ai_fluency_collector.scoring import (
@@ -138,4 +139,15 @@ def main(config_path: str, period: str | None) -> None:
     click.echo(f"  → {len(ci_signals)} CI signals detected")
     click.echo()
 
-    # Output will be wired in Task 4.0
+    # 10. Build and write output JSON
+    data = build_output(team.code, period, artifact_signals, ci_signals)
+    output_path = write_output(data, team.code, period)
+
+    # 11. Print summary
+    total_signals = len(artifact_signals) + len(ci_signals)
+    num_sources = len(data["sources"])
+    click.echo("Summary")
+    click.echo(f"  File:    {output_path}")
+    click.echo(f"  Sources: {num_sources}")
+    click.echo(f"  Signals: {total_signals}")
+    click.echo(f"  Team:    {team.code}")

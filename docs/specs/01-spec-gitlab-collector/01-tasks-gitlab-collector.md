@@ -101,7 +101,7 @@ Implement the CI config scanner that fetches and parses `.gitlab-ci.yml` from ea
 - [x] 3.5 Wire CI scanning into CLI: after artifact scanning, run CI scanner on each project, compute CI scores using the shared scoring engine, and print per-project CI pattern detection summary to stdout
 - [x] 3.6 Write `tests/test_ci_scanner.py`: mock `.gitlab-ci.yml` content for each of the 7 pattern types. Test: each pattern detected individually, multiple patterns in one file, `include` template directives detected (string, `template:`, list formats), missing `.gitlab-ci.yml` returns all False with no error, invalid YAML gracefully handled
 
-### [ ] 4.0 JSON Output, Scoring Documentation, and End-to-End Flow
+### [x] 4.0 JSON Output, Scoring Documentation, and End-to-End Flow
 
 Combine signals from both scanners into the final JSON output file matching the ai-fluency import schema. Write `docs/scoring.md` documenting every mapping, weight, formula, and modification instructions. Verify the full end-to-end flow produces an importable file.
 
@@ -114,9 +114,9 @@ Combine signals from both scanners into the final JSON output file matching the 
 
 #### 4.0 Tasks
 
-- [ ] 4.1 Implement `src/ai_fluency_collector/output.py`: a `build_output(team_code, survey_period, artifact_signals, ci_signals) -> dict` function that merges signals into the schema: `{ team_code, survey_period, sources: [{ source_id, signals: [{ skill_id, score, evidence }] }] }`. Use `source_id` values `gitlab-repo-artifacts` and `gitlab-ci-config`. Omit any source that produced zero signals
-- [ ] 4.2 Implement `write_output(data: dict, team_code: str, survey_period: str) -> str` that writes JSON to `{team_code}-{survey_period}.json` in the current working directory with 2-space indentation. Return the file path
-- [ ] 4.3 Wire output into CLI: after both scanners complete, call `build_output` and `write_output`. Print a summary to stdout: output file path, number of sources included, total signal count, and team code
-- [ ] 4.4 Write `tests/test_output.py`: test JSON structure matches expected schema, test `source_id` values are exact, test empty source is omitted, test file is written to correct path with correct content, test summary output format
-- [ ] 4.5 Write `docs/scoring.md`: document (1) every artifact and CI pattern the collector detects with its pattern ID, (2) which `skill_id` each maps to, (3) the weight assigned to each mapping, (4) the scoring formula with a fully worked example showing real numbers, (5) step-by-step instructions for how to add new mappings or modify weights
-- [ ] 4.6 End-to-end verification: run `ruff check .` and `ruff format --check .` to confirm no lint/format issues. Run `pytest` to confirm all tests pass. Run the CLI against a real or test GitLab project to verify the full flow produces valid JSON
+- [x] 4.1 Implement `src/ai_fluency_collector/output.py`: a `build_output(team_code, survey_period, artifact_signals, ci_signals) -> dict` function that merges signals into the schema: `{ team_code, survey_period, sources: [{ source_id, signals: [{ skill_id, score, evidence }] }] }`. Use `source_id` values `gitlab-repo-artifacts` and `gitlab-ci-config`. Omit any source that produced zero signals
+- [x] 4.2 Implement `write_output(data: dict, team_code: str, survey_period: str) -> str` that writes JSON to `{team_code}-{survey_period}.json` in the current working directory with 2-space indentation. Return the file path
+- [x] 4.3 Wire output into CLI: after both scanners complete, call `build_output` and `write_output`. Print a summary to stdout: output file path, number of sources included, total signal count, and team code
+- [x] 4.4 Write `tests/test_output.py`: test JSON structure matches expected schema, test `source_id` values are exact, test empty source is omitted, test file is written to correct path with correct content, test summary output format
+- [x] 4.5 Write `docs/scoring.md`: document (1) every artifact and CI pattern the collector detects with its pattern ID, (2) which `skill_id` each maps to, (3) the weight assigned to each mapping, (4) the scoring formula with a fully worked example showing real numbers, (5) step-by-step instructions for how to add new mappings or modify weights
+- [x] 4.6 End-to-end verification: run `ruff check .` and `ruff format --check .` to confirm no lint/format issues. Run `pytest` to confirm all tests pass. Run the CLI against a real or test GitLab project to verify the full flow produces valid JSON
