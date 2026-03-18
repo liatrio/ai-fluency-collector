@@ -4,19 +4,20 @@
 
 The AI Fluency Collector is a standalone Python CLI tool that scans GitLab repositories for evidence of AI adoption and outputs a JSON file compatible with the ai-fluency application's import format. It addresses the gap between subjective survey data (Formbricks) and objective, measurable signals by automatically detecting AI tool artifacts and CI pipeline patterns across a team's repositories.
 
-The collector reads a YAML config file defining a team (name, code, members, project list), authenticates with GitLab.com via an environment variable token, scans each project for artifact presence and CI configuration patterns, calculates weighted skill scores, and writes a single JSON file ready for import.
+The collector reads a YAML config file defining a team (name, code, members with GitLab usernames, project list), authenticates with GitLab.com via an environment variable token, scans each project for artifact presence and CI configuration patterns, discovers member AI activity across all repos they touch, calculates weighted skill scores, and writes a single JSON file ready for import.
 
 ## Goals
 
 - Automate the collection of quantitative AI adoption signals from GitLab repositories
 - Produce a JSON file that passes the ai-fluency import schema validation without manual editing
-- Support two signal sources in the initial release: GitLab Repo Artifacts and GitLab CI Config
+- Support three signal sources in the initial release: GitLab Repo Artifacts, GitLab CI Config, and GitLab Member Activity
 - Use weighted scoring so that deeper adoption (multiple artifacts per skill) produces higher scores than surface-level presence
 - Fail fast and clearly when a project is inaccessible so the operator knows exactly what to fix
 
 ## User Stories
 
-- **As a team lead**, I want to run a single command against my team's GitLab projects so that I get an objective, data-backed view of our AI adoption without relying solely on self-reported surveys.
+- **As a team lead**, I want to run a single command against my team's GitLab projects and member handles so that I get an objective, data-backed view of our AI adoption without relying solely on self-reported surveys.
+- **As a team lead**, I want to discover AI usage by my team members across repos I didn't explicitly list, so that I capture adoption signals that would otherwise be invisible.
 - **As a platform engineer**, I want the collector to output a file I can directly upload to the ai-fluency import page so that I don't have to manually construct JSON.
 - **As a consultant**, I want a simple YAML config per client team so that I can run the collector across multiple engagements without mixing data.
 
@@ -30,7 +31,7 @@ The collector reads a YAML config file defining a team (name, code, members, pro
 - The system shall be installable via `pip install -e .` from the repo root
 - The CLI shall accept a `--config` flag pointing to a YAML file and a `--period` flag to override the survey period
 - The CLI shall default the survey period to the current ISO week (YYYY-WNN) when `--period` is not provided
-- The system shall parse the YAML config and validate required fields: `team.name`, `team.code`, `team.projects` (non-empty list)
+- The system shall parse the YAML config and validate required fields: `team.name`, `team.code`, `team.members` (list of GitLab usernames, non-empty), `team.projects` (non-empty list)
 - The system shall read the GitLab token from the `GITLAB_TOKEN` environment variable
 - The CLI shall provide clear, actionable error messages for every failure mode a user is likely to encounter:
   - Config file does not exist: "Config file not found: {path}. Create one from config.example.yaml"
@@ -102,9 +103,9 @@ The collector reads a YAML config file defining a team (name, code, members, pro
 **Purpose:** Combine artifact and CI signals into a single JSON file matching the ai-fluency import schema.
 
 **Functional Requirements:**
-- The system shall merge signals from both sources (gitlab-repo-artifacts, gitlab-ci-config) into a single output file
+- The system shall merge signals from all sources (gitlab-repo-artifacts, gitlab-ci-config, gitlab-member-activity) into a single output file
 - The output JSON shall conform to the ai-fluency import schema: `{ team_code, survey_period, sources: [{ source_id, signals: [{ skill_id, score, evidence }] }] }`
-- The `source_id` values shall be exactly `gitlab-repo-artifacts` and `gitlab-ci-config`
+- The `source_id` values shall be exactly `gitlab-repo-artifacts`, `gitlab-ci-config`, and `gitlab-member-activity`
 - The system shall only include sources that produced at least one signal (omit empty source blocks)
 - The system shall write the output file to `{team_code}-{survey_period}.json` in the current working directory
 - The system shall print a summary to stdout after writing: file path, number of sources, total signals, and team code
@@ -117,6 +118,32 @@ The collector reads a YAML config file defining a team (name, code, members, pro
 - Test: `test_output.py` passes, demonstrating JSON structure, schema conformance, and file writing
 - Import: The output file is successfully imported via the ai-fluency Import page
 - Doc: `docs/scoring.md` exists and accurately reflects the scoring mappings in code
+
+### Unit 5: GitLab Member Activity Scanner
+
+**Purpose:** Discover AI adoption signals across all repos team members touch, not just the explicitly listed projects, by scanning member activity for AI co-authored commits.
+
+**Functional Requirements:**
+- The config `team.members` field shall contain GitLab usernames (not display names)
+- The system shall validate that each member username exists on GitLab.com via the Users API
+- The system shall discover all projects each member owns via the Users Projects API
+- The system shall discover all projects each member has recently pushed to via the Events API (push events)
+- The system shall combine owned and active projects into a deduplicated set of "member repos" per team (excluding projects already in `team.projects` to avoid double-counting)
+- The system shall search commit messages in member repos for AI co-author patterns:
+  - `Co-Authored-By: Claude` (or `Co-authored-by:` case-insensitive)
+  - `Co-Authored-By: GitHub Copilot`
+  - `Co-Authored-By: Cursor`
+- The system shall only scan commits authored by team members (filter by member username/email)
+- The system shall scope commit scanning to a reasonable time window (e.g., last 90 days or configurable)
+- The system shall calculate weighted skill scores based on the presence and frequency of AI co-authored commits across member repos
+- The system shall include an `evidence` string for each signal (e.g., "Co-authored commits with Claude found for 3/5 members across 7 repos")
+- The system shall NOT run full artifact or CI scans on discovered member repos (only commit-level signals)
+- The system shall handle members with no public activity gracefully (score 0, no error)
+
+**Proof Artifacts:**
+- CLI: `ai-fluency-collector --config team.yaml` run with member usernames shows discovered repos and AI co-author signals
+- Test: `test_member_scanner.py` passes with mocked GitLab API responses, demonstrating member repo discovery and co-author detection
+- Test: Members with no activity produce score 0 with no error
 
 ## Non-Goals (Out of Scope)
 
@@ -150,6 +177,8 @@ This is a new repository. The following standards will be established:
 - **CI YAML parsing**: Use Python's `yaml.safe_load` to parse `.gitlab-ci.yml`. Handle `include` directives by checking for known template paths in the include list, not by fetching included files recursively.
 - **Weighted scoring (must be easy to tune)**: The scoring logic is the part of the system most likely to change based on real-world feedback. All artifact-to-skill mappings and their weights must live in a single, declarative data structure (e.g., a Python dict or YAML file) that is separate from the scanning logic. Scanners produce boolean "found/not-found" results per artifact per project. The scoring module reads the mapping, combines the scanner results, and computes scores. This separation means adjusting which artifacts contribute to which skills, or changing a weight from 0.3 to 0.5, requires editing one data structure with zero changes to scanner or output code. The formula is: `min(100, sum(found_weights) / sum(all_weights) * 100)`, averaged across team projects.
 - **Output schema**: Must match the Zod schema in `ai-fluency/app/src/types/quantitative.ts`. Skill IDs must be exact matches from the skill tree.
+- **Member Activity API**: Uses the [Users API](https://docs.gitlab.com/ee/api/users.html) to look up members, the [User Projects API](https://docs.gitlab.com/ee/api/projects.html#list-user-projects) to find owned projects, the [Events API](https://docs.gitlab.com/ee/api/events.html#list-a-users-contribution-events) to find push events, and the [Commits API](https://docs.gitlab.com/ee/api/commits.html) to read commit messages for co-author patterns.
+- **Rate limiting for member scanning**: Member activity scanning may require significantly more API calls than project scanning (events + commits for each discovered repo). For a team of 5 members with 10 repos each, this could be ~100+ API calls. Still within GitLab's 2000 req/min limit but worth monitoring.
 
 ## Security Considerations
 

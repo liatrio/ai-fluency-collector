@@ -23,6 +23,8 @@
 - `tests/test_scoring.py` - Scoring engine tests (weighted calculation, multi-artifact boosting)
 - `tests/test_ci_scanner.py` - CI pattern detection tests with mocked YAML content
 - `tests/test_output.py` - JSON structure, schema conformance, and file writing tests
+- `src/ai_fluency_collector/scanners/member_scanner.py` - Member activity scanner (repo discovery, co-author commit detection)
+- `tests/test_member_scanner.py` - Member activity scanner tests with mocked GitLab API
 - `docs/scoring.md` - Scoring documentation: mappings, weights, formula, worked example, modification guide
 
 ### Notes
@@ -120,3 +122,31 @@ Combine signals from both scanners into the final JSON output file matching the 
 - [x] 4.4 Write `tests/test_output.py`: test JSON structure matches expected schema, test `source_id` values are exact, test empty source is omitted, test file is written to correct path with correct content, test summary output format
 - [x] 4.5 Write `docs/scoring.md`: document (1) every artifact and CI pattern the collector detects with its pattern ID, (2) which `skill_id` each maps to, (3) the weight assigned to each mapping, (4) the scoring formula with a fully worked example showing real numbers, (5) step-by-step instructions for how to add new mappings or modify weights
 - [x] 4.6 End-to-end verification: run `ruff check .` and `ruff format --check .` to confirm no lint/format issues. Run `pytest` to confirm all tests pass. Run the CLI against a real or test GitLab project to verify the full flow produces valid JSON
+
+### [ ] 5.0 Config Update, Member Activity Scanner, and Integration
+
+Update the config format to use GitLab usernames for members, implement the member activity scanner that discovers repos members own and contribute to, detect AI co-authored commits, add scoring mappings, wire into CLI and output, and update docs.
+
+#### 5.0 Proof Artifact(s)
+
+- CLI: `ai-fluency-collector --config team.yaml` with member usernames shows discovered member repos and AI co-author detection
+- Test: `pytest tests/test_config.py` passes with updated member validation (GitLab usernames required, non-empty)
+- Test: `pytest tests/test_member_scanner.py` passes with mocked GitLab API responses, demonstrating member repo discovery, co-author pattern detection, and graceful handling of inactive members
+- Test: `pytest tests/test_output.py` passes with third source `gitlab-member-activity` included
+- Doc: `docs/scoring.md` updated with member activity mappings
+
+#### 5.0 Tasks
+
+- [ ] 5.1 Update `config.py`: change `members` from `list[str]` to `list[str]` representing GitLab usernames (not display names). Make `team.members` a required field (non-empty list). Update validation to check for non-empty members list
+- [ ] 5.2 Update `config.example.yaml`: change members to GitLab usernames with updated comments explaining the field
+- [ ] 5.3 Update `tests/test_config.py`: add test for missing `team.members`, empty `team.members` list. Update existing tests to use GitLab usernames in the members field
+- [ ] 5.4 Add GitLab client methods to `gitlab_client.py`: `get_user(username) -> dict | None` using GET `/users?username=X`, `get_user_projects(user_id) -> list[dict]` using GET `/users/:id/projects`, `get_user_events(user_id, action="pushed") -> list[dict]` using GET `/users/:id/events`, `get_project_commits(project_id, author=username, since=date) -> list[dict]` using GET `/projects/:id/repository/commits`
+- [ ] 5.5 Implement `src/ai_fluency_collector/scanners/member_scanner.py`: a `MemberScanner` class that takes a `GitLabClient` and a list of member usernames. For each member: (1) look up user via Users API, (2) get owned projects via User Projects API, (3) get recent push events via Events API to discover active projects, (4) deduplicate and exclude projects already in `team.projects`, (5) for each discovered repo, fetch recent commits by the member and search commit messages for AI co-author patterns (`Co-Authored-By: Claude`, `Co-Authored-By: GitHub Copilot`, `Co-Authored-By: Cursor` — case-insensitive). Return per-member results: `{member: str, repos_discovered: int, ai_coauthor_counts: {pattern: count}}`
+- [ ] 5.6 Add `MEMBER_SKILL_MAPPINGS` to `scoring.py`: define mappings for member activity patterns to skill IDs. Co-authored commits with Claude → im-cli-agent, im-chat. Co-authored commits with Copilot → im-autocomplete. Co-authored commits with Cursor → im-autocomplete, im-inline-edit. Calculate scores based on what percentage of members show AI co-author activity
+- [ ] 5.7 Wire member scanning into CLI: after CI scanning, run member scanner. Print per-member discovery summary (repos found, AI co-author signals). Calculate member activity scores using shared scoring engine
+- [ ] 5.8 Update `output.py`: extend `build_output` to accept a third `member_signals` parameter. Add `gitlab-member-activity` as a third source_id. Update CLI to pass member signals to output
+- [ ] 5.9 Write `tests/test_member_scanner.py`: mock GitLab Users API, User Projects API, Events API, and Commits API. Test: member lookup by username, project discovery (owned + pushed), commit co-author pattern detection for all 3 AI tools (case-insensitive), deduplication of projects already in team.projects, member with no activity returns empty results (no error), member username not found raises descriptive error
+- [ ] 5.10 Update `tests/test_output.py`: add test for third source `gitlab-member-activity`, verify it is omitted when empty, verify source_id is exact
+- [ ] 5.11 Update `tests/test_cli.py`: update mocked CLI tests to account for member scanning step
+- [ ] 5.12 Update `docs/scoring.md`: add member activity pattern mappings, weights, and evidence format. Add a worked example for member activity scoring
+- [ ] 5.13 End-to-end verification: run `ruff check .` and `ruff format --check .`, run `pytest`, verify the full CLI flow includes member scanning in output
