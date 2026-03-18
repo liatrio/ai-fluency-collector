@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import yaml
 from click.testing import CliRunner
@@ -19,6 +19,18 @@ def _write_valid_config(tmp_path):
     path = tmp_path / "team.yaml"
     path.write_text(yaml.dump(config))
     return str(path)
+
+
+def _mock_client_with_scanners():
+    """Create a mock GitLabClient whose methods return values scanners can handle."""
+    mock_cls = MagicMock()
+    client = mock_cls.return_value
+    # ArtifactScanner calls check_file_exists / check_directory_exists → return False
+    client.check_file_exists.return_value = False
+    client.check_directory_exists.return_value = False
+    # CIScanner calls get_file_content → return None (no .gitlab-ci.yml)
+    client.get_file_content.return_value = None
+    return mock_cls
 
 
 def test_help_output():
@@ -69,6 +81,10 @@ def test_invalid_period_week_zero(tmp_path, monkeypatch):
 @patch("ai_fluency_collector.cli.GitLabClient")
 def test_startup_banner(mock_client_cls, tmp_path, monkeypatch):
     monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    client = mock_client_cls.return_value
+    client.check_file_exists.return_value = False
+    client.check_directory_exists.return_value = False
+    client.get_file_content.return_value = None
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
     result = runner.invoke(main, ["--config", config_path, "--period", "2026-W12"])
@@ -77,17 +93,20 @@ def test_startup_banner(mock_client_cls, tmp_path, monkeypatch):
     assert "1" in result.output  # 1 project
     assert "2026-W12" in result.output
     assert "test-team-2026-W12.json" in result.output
-    mock_client_cls.return_value.validate_token.assert_called_once()
+    client.validate_token.assert_called_once()
 
 
 @patch("ai_fluency_collector.cli.GitLabClient")
 def test_default_period_uses_current_week(mock_client_cls, tmp_path, monkeypatch):
     monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    client = mock_client_cls.return_value
+    client.check_file_exists.return_value = False
+    client.check_directory_exists.return_value = False
+    client.get_file_content.return_value = None
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
     result = runner.invoke(main, ["--config", config_path])
     assert result.exit_code == 0
-    # Should contain a period in YYYY-WNN format
     assert "-W" in result.output
 
 

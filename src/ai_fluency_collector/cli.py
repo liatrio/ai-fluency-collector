@@ -9,7 +9,12 @@ import click
 from ai_fluency_collector.config import load_config
 from ai_fluency_collector.gitlab_client import GitLabAccessError, GitLabAuthError, GitLabClient
 from ai_fluency_collector.scanners.artifact_scanner import ARTIFACT_DEFINITIONS, ArtifactScanner
-from ai_fluency_collector.scoring import ARTIFACT_SKILL_MAPPINGS, calculate_scores
+from ai_fluency_collector.scanners.ci_scanner import CI_PATTERN_IDS, CIScanner
+from ai_fluency_collector.scoring import (
+    ARTIFACT_SKILL_MAPPINGS,
+    CI_SKILL_MAPPINGS,
+    calculate_scores,
+)
 
 PERIOD_PATTERN = re.compile(r"^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$")
 
@@ -110,4 +115,27 @@ def main(config_path: str, period: str | None) -> None:
     click.echo(f"  → {len(artifact_signals)} artifact signals detected")
     click.echo()
 
-    # CI scanning and output will be wired in Tasks 3.0 and 4.0
+    # 8. Scan for CI config patterns
+    click.echo("Scanning CI configurations...")
+    ci_scanner = CIScanner(client)
+    all_ci_results: list[dict[str, bool]] = []
+
+    for project in team.projects:
+        try:
+            result = ci_scanner.scan_project(project)
+        except (GitLabAccessError, GitLabAuthError) as e:
+            raise click.ClickException(str(e)) from e
+
+        all_ci_results.append(result)
+        found = [pid for pid in CI_PATTERN_IDS if result.get(pid, False)]
+        if found:
+            click.echo(f"  {project}: {', '.join(found)}")
+        else:
+            click.echo(f"  {project}: no CI patterns found")
+
+    # 9. Calculate CI scores
+    ci_signals = calculate_scores(all_ci_results, CI_SKILL_MAPPINGS)
+    click.echo(f"  → {len(ci_signals)} CI signals detected")
+    click.echo()
+
+    # Output will be wired in Task 4.0

@@ -21,7 +21,18 @@ ARTIFACT_SKILL_MAPPINGS: list[dict] = [
 ]
 
 # CI pattern → skill mappings (added in Task 3.0)
-CI_SKILL_MAPPINGS: list[dict] = []
+# CI pattern → skill mappings
+CI_SKILL_MAPPINGS: list[dict] = [
+    {"artifact_id": "sast-dast", "skill_id": "sdlc-security", "weight": 0.4},
+    {"artifact_id": "sast-dast", "skill_id": "tg-security-gates", "weight": 0.5},
+    {"artifact_id": "secret-detection", "skill_id": "sdlc-security", "weight": 0.3},
+    {"artifact_id": "ai-code-review", "skill_id": "tg-code-review", "weight": 1.0},
+    {"artifact_id": "ai-test-generation", "skill_id": "sdlc-testing", "weight": 1.0},
+    {"artifact_id": "dependency-scanning", "skill_id": "sdlc-security", "weight": 0.3},
+    {"artifact_id": "code-coverage", "skill_id": "pm-measurement", "weight": 1.0},
+    {"artifact_id": "deployment-gates", "skill_id": "sdlc-deployment", "weight": 0.5},
+    {"artifact_id": "deployment-gates", "skill_id": "tg-supervised-auto", "weight": 0.5},
+]
 
 
 def _get_artifact_name(artifact_id: str) -> str:
