@@ -9,6 +9,7 @@ def build_output(
     survey_period: str,
     artifact_signals: list[dict],
     ci_signals: list[dict],
+    member_signals: list[dict] | None = None,
 ) -> dict:
     """Build the output dict matching the ai-fluency import schema.
 
@@ -29,6 +30,14 @@ def build_output(
             {
                 "source_id": "gitlab-ci-config",
                 "signals": ci_signals,
+            }
+        )
+
+    if member_signals:
+        sources.append(
+            {
+                "source_id": "gitlab-member-activity",
+                "signals": member_signals,
             }
         )
 

@@ -13,6 +13,10 @@ class GitLabAccessError(Exception):
     pass
 
 
+class GitLabUserNotFoundError(Exception):
+    pass
+
+
 class GitLabClient:
     """Client for GitLab REST API v4."""
 
@@ -114,3 +118,85 @@ class GitLabClient:
             )
         resp.raise_for_status()
         return None
+
+    def get_user(self, username: str) -> dict:
+        """Look up a GitLab user by username.
+
+        Returns the user dict. Raises GitLabUserNotFoundError if not found.
+        """
+        url = self._api_url("/users")
+        resp = self.session.get(url, params={"username": username})
+        resp.raise_for_status()
+        users = resp.json()
+        if not users:
+            raise GitLabUserNotFoundError(
+                f"GitLab user '{username}' not found. Check the username in your config."
+            )
+        return users[0]
+
+    def get_user_projects(self, user_id: int) -> list[dict]:
+        """Get all projects owned by a user."""
+        url = self._api_url(f"/users/{user_id}/projects")
+        results: list[dict] = []
+        page = 1
+        while True:
+            resp = self.session.get(url, params={"per_page": 100, "page": page, "owned": True})
+            resp.raise_for_status()
+            items = resp.json()
+            if not items:
+                break
+            results.extend(items)
+            page += 1
+        return results
+
+    def get_user_events(self, user_id: int, action: str = "pushed") -> list[dict]:
+        """Get a user's contribution events filtered by action type."""
+        url = self._api_url(f"/users/{user_id}/events")
+        results: list[dict] = []
+        page = 1
+        while True:
+            resp = self.session.get(
+                url,
+                params={"action": action, "per_page": 100, "page": page},
+            )
+            resp.raise_for_status()
+            items = resp.json()
+            if not items:
+                break
+            results.extend(items)
+            page += 1
+        return results
+
+    def get_project_commits(
+        self,
+        project_id: int,
+        author: str | None = None,
+        since: str | None = None,
+    ) -> list[dict]:
+        """Get commits from a project, optionally filtered by author and date.
+
+        Args:
+            project_id: The numeric project ID.
+            author: Filter commits by author username or email.
+            since: ISO 8601 date string to filter commits after.
+        """
+        url = self._api_url(f"/projects/{project_id}/repository/commits")
+        params: dict = {"per_page": 100}
+        if author:
+            params["author"] = author
+        if since:
+            params["since"] = since
+        results: list[dict] = []
+        page = 1
+        while True:
+            params["page"] = page
+            resp = self.session.get(url, params=params)
+            if resp.status_code == 404:
+                return []
+            resp.raise_for_status()
+            items = resp.json()
+            if not items:
+                break
+            results.extend(items)
+            page += 1
+        return results

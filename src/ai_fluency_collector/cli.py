@@ -7,13 +7,21 @@ from datetime import date
 import click
 
 from ai_fluency_collector.config import load_config
-from ai_fluency_collector.gitlab_client import GitLabAccessError, GitLabAuthError, GitLabClient
+from ai_fluency_collector.gitlab_client import (
+    GitLabAccessError,
+    GitLabAuthError,
+    GitLabClient,
+    GitLabUserNotFoundError,
+)
 from ai_fluency_collector.output import build_output, write_output
 from ai_fluency_collector.scanners.artifact_scanner import ARTIFACT_DEFINITIONS, ArtifactScanner
 from ai_fluency_collector.scanners.ci_scanner import CI_PATTERN_IDS, CIScanner
+from ai_fluency_collector.scanners.member_scanner import MemberScanner
 from ai_fluency_collector.scoring import (
     ARTIFACT_SKILL_MAPPINGS,
     CI_SKILL_MAPPINGS,
+    MEMBER_SKILL_MAPPINGS,
+    calculate_member_scores,
     calculate_scores,
 )
 
@@ -82,6 +90,7 @@ def main(config_path: str, period: str | None) -> None:
     output_file = f"{team.code}-{period}.json"
     click.echo("AI Fluency Collector")
     click.echo(f"  Team:     {team.name}")
+    click.echo(f"  Members:  {len(team.members)}")
     click.echo(f"  Projects: {len(team.projects)}")
     click.echo(f"  Period:   {period}")
     click.echo(f"  Output:   {output_file}")
@@ -139,12 +148,37 @@ def main(config_path: str, period: str | None) -> None:
     click.echo(f"  → {len(ci_signals)} CI signals detected")
     click.echo()
 
-    # 10. Build and write output JSON
-    data = build_output(team.code, period, artifact_signals, ci_signals)
+    # 10. Scan member activity
+    click.echo("Scanning member activity...")
+    member_scanner = MemberScanner(client, team.projects)
+    try:
+        member_results = member_scanner.scan_all_members(team.members)
+    except GitLabUserNotFoundError as e:
+        raise click.ClickException(str(e)) from e
+
+    for result in member_results:
+        if result.ai_coauthor_counts:
+            patterns = ", ".join(f"{k}: {v}" for k, v in result.ai_coauthor_counts.items())
+            click.echo(
+                f"  {result.username}: {result.repos_discovered} repos discovered, {patterns}"
+            )
+        else:
+            click.echo(
+                f"  {result.username}: {result.repos_discovered} repos discovered, "
+                f"no AI co-author commits"
+            )
+
+    # 11. Calculate member activity scores
+    member_signals = calculate_member_scores(member_results, MEMBER_SKILL_MAPPINGS)
+    click.echo(f"  → {len(member_signals)} member activity signals detected")
+    click.echo()
+
+    # 12. Build and write output JSON
+    data = build_output(team.code, period, artifact_signals, ci_signals, member_signals)
     output_path = write_output(data, team.code, period)
 
-    # 11. Print summary
-    total_signals = len(artifact_signals) + len(ci_signals)
+    # 13. Print summary
+    total_signals = len(artifact_signals) + len(ci_signals) + len(member_signals)
     num_sources = len(data["sources"])
     click.echo("Summary")
     click.echo(f"  File:    {output_path}")

@@ -45,11 +45,17 @@ def load_config(path: str) -> TeamConfig:
         missing.append("team.name")
     if not team.get("code"):
         missing.append("team.code")
+    if "members" not in team:
+        missing.append("team.members")
     if "projects" not in team:
         missing.append("team.projects")
 
     if missing:
         raise ValueError(f"Missing required field: {', '.join(missing)}")
+
+    members = team["members"]
+    if not isinstance(members, list) or len(members) == 0:
+        raise ValueError("team.members must be a non-empty list of GitLab usernames")
 
     projects = team["projects"]
     if not isinstance(projects, list) or len(projects) == 0:
@@ -58,6 +64,6 @@ def load_config(path: str) -> TeamConfig:
     return TeamConfig(
         name=team["name"],
         code=team["code"],
-        members=team.get("members", []),
+        members=members,
         projects=projects,
     )

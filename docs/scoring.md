@@ -34,6 +34,18 @@ This document describes every artifact and CI pattern the collector detects, whi
 | `deployment-gates` | Deploy stages with environment and rules | `sdlc-deployment` | 0.5 |
 | `deployment-gates` | (same) | `tg-supervised-auto` | 0.5 |
 
+## Member Activity Mappings
+
+| Pattern ID | What It Detects | Skill ID | Weight |
+|---|---|---|---|
+| `coauthor-claude` | Co-Authored-By: Claude in commit messages | `im-cli-agent` | 0.5 |
+| `coauthor-claude` | (same) | `im-chat` | 0.5 |
+| `coauthor-copilot` | Co-Authored-By: GitHub Copilot in commit messages | `im-autocomplete` | 0.5 |
+| `coauthor-cursor` | Co-Authored-By: Cursor in commit messages | `im-autocomplete` | 0.3 |
+| `coauthor-cursor` | (same) | `im-inline-edit` | 0.3 |
+
+Member activity scores are based on the percentage of team members who have AI co-authored commits. For example, if 3 out of 5 members have Claude co-authored commits, the weight contribution is scaled by 3/5 = 60%.
+
 ## Scoring Formula
 
 For each skill, the score is calculated as:
@@ -70,12 +82,31 @@ Total weight for `im-autocomplete` = 0.3 + 0.3 + 0.3 = 0.9
 
 **Evidence**: "CLAUDE.md found in 3/4 projects; .cursorrules or .cursor/ found in 2/4 projects; .github/copilot-instructions.md found in 1/4 projects"
 
+### Worked Example: Member Activity
+
+**Setup**: A team has 3 members. The skill `im-cli-agent` has one contributing mapping:
+- `coauthor-claude` → weight 0.5
+
+**Member results**:
+| Member | Claude co-authored commits |
+|---|---|
+| alice | 12 commits |
+| bob | 0 commits |
+| carol | 5 commits |
+
+2 out of 3 members have Claude co-authored commits. The weight contribution is 0.5 × (2/3) = 0.333.
+
+**Score**: round(min(100, 0.333 / 0.5 × 100)) = round(66.7) = **67**
+
+**Evidence**: "Co-authored commits with Claude by 2/3 members (17 commits)"
+
 ## Modifying Weights and Mappings
 
-All mappings live in `src/ai_fluency_collector/scoring.py` as two data structures:
+All mappings live in `src/ai_fluency_collector/scoring.py` as three data structures:
 
 - `ARTIFACT_SKILL_MAPPINGS` — repo artifact → skill mappings
 - `CI_SKILL_MAPPINGS` — CI pattern → skill mappings
+- `MEMBER_SKILL_MAPPINGS` — member activity → skill mappings
 
 ### To change a weight
 
@@ -118,5 +149,18 @@ ARTIFACT_SKILL_MAPPINGS: list[dict] = [
 2. Add the pattern ID to `CI_PATTERN_IDS`
 3. Add mapping entries to `CI_SKILL_MAPPINGS` in `scoring.py`
 4. Update this document to reflect the new mappings
+
+### To add a new co-author pattern
+
+1. Add a pattern definition to `AI_COAUTHOR_PATTERNS` in `src/ai_fluency_collector/scanners/member_scanner.py`:
+   ```python
+   {
+       "id": "coauthor-new-tool",
+       "name": "New Tool",
+       "pattern": re.compile(r"co-authored-by:.*new.?tool", re.IGNORECASE),
+   }
+   ```
+2. Add mapping entries to `MEMBER_SKILL_MAPPINGS` in `scoring.py`
+3. Update this document to reflect the new mappings
 
 **Important**: Keep this document in sync with the code. If mappings change, update this document in the same commit.

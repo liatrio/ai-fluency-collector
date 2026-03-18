@@ -34,6 +34,98 @@ CI_SKILL_MAPPINGS: list[dict] = [
 ]
 
 
+# Member activity → skill mappings
+# Score based on percentage of members showing AI co-author activity
+MEMBER_SKILL_MAPPINGS: list[dict] = [
+    {"artifact_id": "coauthor-claude", "skill_id": "im-cli-agent", "weight": 0.5},
+    {"artifact_id": "coauthor-claude", "skill_id": "im-chat", "weight": 0.5},
+    {"artifact_id": "coauthor-copilot", "skill_id": "im-autocomplete", "weight": 0.5},
+    {"artifact_id": "coauthor-cursor", "skill_id": "im-autocomplete", "weight": 0.3},
+    {"artifact_id": "coauthor-cursor", "skill_id": "im-inline-edit", "weight": 0.3},
+]
+
+
+def calculate_member_scores(
+    member_results: list,
+    mappings: list[dict],
+) -> list[dict]:
+    """Calculate skill scores from member activity scan results.
+
+    Score is based on the percentage of members who have any co-author
+    commits for each pattern. E.g., if 3/5 members have Claude co-author
+    commits, the score for Claude-related skills is 60.
+
+    Args:
+        member_results: List of MemberResult objects.
+        mappings: List of mapping dicts with artifact_id, skill_id, weight.
+
+    Returns:
+        List of {skill_id, score, evidence} dicts.
+    """
+    if not member_results:
+        return []
+
+    num_members = len(member_results)
+
+    # Count how many members have each pattern
+    pattern_member_counts: dict[str, int] = defaultdict(int)
+    pattern_total_commits: dict[str, int] = defaultdict(int)
+    for result in member_results:
+        for pattern_id, count in result.ai_coauthor_counts.items():
+            if count > 0:
+                pattern_member_counts[pattern_id] += 1
+                pattern_total_commits[pattern_id] += count
+
+    # Group mappings by skill_id
+    skill_mappings: dict[str, list[dict]] = defaultdict(list)
+    for m in mappings:
+        skill_mappings[m["skill_id"]].append(m)
+
+    signals: list[dict] = []
+
+    for skill_id, skill_maps in skill_mappings.items():
+        found_weight = 0.0
+        total_weight = 0.0
+        evidence_parts = []
+
+        for m in skill_maps:
+            aid = m["artifact_id"]
+            total_weight += m["weight"]
+            member_count = pattern_member_counts.get(aid, 0)
+            if member_count > 0:
+                # Weight by proportion of members with this pattern
+                found_weight += m["weight"] * (member_count / num_members)
+                commits = pattern_total_commits.get(aid, 0)
+                # Get pattern display name
+                from ai_fluency_collector.scanners.member_scanner import (
+                    AI_COAUTHOR_PATTERNS,
+                )
+
+                name = aid
+                for p in AI_COAUTHOR_PATTERNS:
+                    if p["id"] == aid:
+                        name = p["name"]
+                        break
+                evidence_parts.append(
+                    f"Co-authored commits with {name} "
+                    f"by {member_count}/{num_members} members "
+                    f"({commits} commits)"
+                )
+
+        if total_weight > 0:
+            score = round(min(100.0, (found_weight / total_weight) * 100.0))
+        else:
+            score = 0
+
+        if score <= 0:
+            continue
+
+        evidence = "; ".join(evidence_parts) if evidence_parts else "detected"
+        signals.append({"skill_id": skill_id, "score": score, "evidence": evidence})
+
+    return signals
+
+
 def _get_artifact_name(artifact_id: str) -> str:
     """Look up the human-readable artifact name."""
     from ai_fluency_collector.scanners.artifact_scanner import ARTIFACT_DEFINITIONS

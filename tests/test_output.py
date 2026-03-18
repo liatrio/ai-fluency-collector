@@ -42,13 +42,30 @@ def test_build_output_empty_sources():
     assert data["sources"] == []
 
 
-def test_source_id_values():
-    """source_id values are exactly as specified."""
-    artifact_signals = [{"skill_id": "x", "score": 1, "evidence": "y"}]
-    ci_signals = [{"skill_id": "x", "score": 1, "evidence": "y"}]
-    data = build_output("t", "2026-W01", artifact_signals, ci_signals)
+def test_source_id_values_all_three():
+    """source_id values are exactly as specified for all three sources."""
+    signals = [{"skill_id": "x", "score": 1, "evidence": "y"}]
+    data = build_output("t", "2026-W01", signals, signals, signals)
     source_ids = [s["source_id"] for s in data["sources"]]
-    assert source_ids == ["gitlab-repo-artifacts", "gitlab-ci-config"]
+    assert source_ids == [
+        "gitlab-repo-artifacts",
+        "gitlab-ci-config",
+        "gitlab-member-activity",
+    ]
+
+
+def test_member_activity_source_included():
+    """gitlab-member-activity source included when member signals present."""
+    member_signals = [{"skill_id": "im-cli-agent", "score": 60, "evidence": "co-author"}]
+    data = build_output("t", "2026-W01", [], [], member_signals)
+    assert len(data["sources"]) == 1
+    assert data["sources"][0]["source_id"] == "gitlab-member-activity"
+
+
+def test_member_activity_source_omitted_when_empty():
+    """gitlab-member-activity source omitted when no member signals."""
+    data = build_output("t", "2026-W01", [], [], [])
+    assert data["sources"] == []
 
 
 def test_write_output_creates_file(tmp_path, monkeypatch):

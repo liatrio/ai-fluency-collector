@@ -10,13 +10,16 @@ team:
   # Short identifier used in output filenames (e.g., my-team-2026-W12.json)
   code: "my-team"
 
-  # List of team member names (for reference, not used in scanning)
+  # List of team member GitLab usernames
+  # Used to discover AI adoption signals across all repos members touch
+  # (e.g., co-authored commits with Claude, Copilot, Cursor)
   members:
-    - "Alice Smith"
-    - "Bob Jones"
+    - "alice.smith"
+    - "bob.jones"
 
   # List of GitLab project paths to scan (namespace/project format)
-  # These must be accessible with your GITLAB_TOKEN
+  # These are scanned for AI tool artifacts and CI patterns
+  # Must be accessible with your GITLAB_TOKEN
   projects:
     - "my-group/project-one"
     - "my-group/project-two"

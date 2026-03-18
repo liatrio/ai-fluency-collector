@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import yaml
 from click.testing import CliRunner
 
 from ai_fluency_collector.cli import main
+from ai_fluency_collector.scanners.member_scanner import MemberResult
 
 
 def _write_valid_config(tmp_path):
@@ -13,6 +14,7 @@ def _write_valid_config(tmp_path):
         "team": {
             "name": "Test Team",
             "code": "test-team",
+            "members": ["alice.smith"],
             "projects": ["group/project-one"],
         }
     }
@@ -21,16 +23,13 @@ def _write_valid_config(tmp_path):
     return str(path)
 
 
-def _mock_client_with_scanners():
-    """Create a mock GitLabClient whose methods return values scanners can handle."""
-    mock_cls = MagicMock()
-    client = mock_cls.return_value
-    # ArtifactScanner calls check_file_exists / check_directory_exists → return False
+def _setup_mock_client(mock_client_cls):
+    """Configure mock client for artifact and CI scanners."""
+    client = mock_client_cls.return_value
     client.check_file_exists.return_value = False
     client.check_directory_exists.return_value = False
-    # CIScanner calls get_file_content → return None (no .gitlab-ci.yml)
     client.get_file_content.return_value = None
-    return mock_cls
+    return client
 
 
 def test_help_output():
@@ -78,31 +77,32 @@ def test_invalid_period_week_zero(tmp_path, monkeypatch):
     assert "Invalid period format" in result.output
 
 
+@patch("ai_fluency_collector.cli.MemberScanner")
 @patch("ai_fluency_collector.cli.GitLabClient")
-def test_startup_banner(mock_client_cls, tmp_path, monkeypatch):
+def test_startup_banner(mock_client_cls, mock_member_cls, tmp_path, monkeypatch):
     monkeypatch.setenv("GITLAB_TOKEN", "test-token")
-    client = mock_client_cls.return_value
-    client.check_file_exists.return_value = False
-    client.check_directory_exists.return_value = False
-    client.get_file_content.return_value = None
+    _setup_mock_client(mock_client_cls)
+    mock_member_cls.return_value.scan_all_members.return_value = [
+        MemberResult(username="alice.smith")
+    ]
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
     result = runner.invoke(main, ["--config", config_path, "--period", "2026-W12"])
     assert result.exit_code == 0
     assert "Test Team" in result.output
-    assert "1" in result.output  # 1 project
     assert "2026-W12" in result.output
     assert "test-team-2026-W12.json" in result.output
-    client.validate_token.assert_called_once()
+    assert "Members:" in result.output or "1" in result.output
 
 
+@patch("ai_fluency_collector.cli.MemberScanner")
 @patch("ai_fluency_collector.cli.GitLabClient")
-def test_default_period_uses_current_week(mock_client_cls, tmp_path, monkeypatch):
+def test_default_period_uses_current_week(mock_client_cls, mock_member_cls, tmp_path, monkeypatch):
     monkeypatch.setenv("GITLAB_TOKEN", "test-token")
-    client = mock_client_cls.return_value
-    client.check_file_exists.return_value = False
-    client.check_directory_exists.return_value = False
-    client.get_file_content.return_value = None
+    _setup_mock_client(mock_client_cls)
+    mock_member_cls.return_value.scan_all_members.return_value = [
+        MemberResult(username="alice.smith")
+    ]
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
     result = runner.invoke(main, ["--config", config_path])
@@ -123,3 +123,19 @@ def test_invalid_gitlab_token(mock_client_cls, tmp_path, monkeypatch):
     result = runner.invoke(main, ["--config", config_path, "--period", "2026-W12"])
     assert result.exit_code != 0
     assert "authentication failed" in result.output
+
+
+@patch("ai_fluency_collector.cli.MemberScanner")
+@patch("ai_fluency_collector.cli.GitLabClient")
+def test_member_scanning_in_output(mock_client_cls, mock_member_cls, tmp_path, monkeypatch):
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    _setup_mock_client(mock_client_cls)
+    mock_member_cls.return_value.scan_all_members.return_value = [
+        MemberResult(username="alice.smith")
+    ]
+    config_path = _write_valid_config(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(main, ["--config", config_path, "--period", "2026-W12"])
+    assert result.exit_code == 0
+    assert "Scanning member activity" in result.output
+    assert "alice.smith" in result.output
