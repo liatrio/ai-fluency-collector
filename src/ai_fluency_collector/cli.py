@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+import os
+import re
+from datetime import date
+
+import click
+
+from ai_fluency_collector.config import load_config
+
+PERIOD_PATTERN = re.compile(r"^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$")
+
+
+def current_iso_week() -> str:
+    """Return the current ISO week as YYYY-WNN."""
+    today = date.today()
+    iso = today.isocalendar()
+    return f"{iso[0]}-W{iso[1]:02d}"
+
+
+def validate_period(period: str) -> str:
+    """Validate and return the period string in YYYY-WNN format."""
+    if not PERIOD_PATTERN.match(period):
+        raise click.BadParameter(
+            f"Invalid period format: {period}. Expected YYYY-WNN (e.g. 2026-W12)"
+        )
+    return period
+
+
+@click.command()
+@click.option(
+    "--config",
+    "config_path",
+    required=True,
+    help="Path to team configuration YAML file.",
+)
+@click.option(
+    "--period",
+    default=None,
+    help="Survey period in YYYY-WNN format (defaults to current ISO week).",
+)
+def main(config_path: str, period: str | None) -> None:
+    """Scan GitLab repositories for AI adoption signals."""
+    # 1. Load and validate config
+    try:
+        team = load_config(config_path)
+    except FileNotFoundError as e:
+        raise click.ClickException(str(e)) from e
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
+
+    # 2. Validate period
+    if period is None:
+        period = current_iso_week()
+    else:
+        validate_period(period)
+
+    # 3. Check GITLAB_TOKEN
+    token = os.environ.get("GITLAB_TOKEN")
+    if not token:
+        raise click.ClickException(
+            "GITLAB_TOKEN environment variable is not set. Export a token with read_api scope."
+        )
+
+    # 4. Print startup banner
+    output_file = f"{team.code}-{period}.json"
+    click.echo("AI Fluency Collector")
+    click.echo(f"  Team:     {team.name}")
+    click.echo(f"  Projects: {len(team.projects)}")
+    click.echo(f"  Period:   {period}")
+    click.echo(f"  Output:   {output_file}")
+    click.echo()
+
+    # Scanning will be wired in Tasks 2.0+

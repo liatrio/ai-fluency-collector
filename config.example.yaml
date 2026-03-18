@@ -1,0 +1,23 @@
+# AI Fluency Collector - Team Configuration
+#
+# Copy this file to your team config (e.g., my-team.yaml) and fill in the values.
+# Do not commit your team config — it is gitignored by default.
+
+team:
+  # Display name for the team
+  name: "My Team"
+
+  # Short identifier used in output filenames (e.g., my-team-2026-W12.json)
+  code: "my-team"
+
+  # List of team member names (for reference, not used in scanning)
+  members:
+    - "Alice Smith"
+    - "Bob Jones"
+
+  # List of GitLab project paths to scan (namespace/project format)
+  # These must be accessible with your GITLAB_TOKEN
+  projects:
+    - "my-group/project-one"
+    - "my-group/project-two"
+    - "my-group/subgroup/project-three"

@@ -1,0 +1,22 @@
+# Output files
+*-W*.json
+
+# Team config files (contain project paths)
+*.yaml
+!config.example.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Ruff
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
