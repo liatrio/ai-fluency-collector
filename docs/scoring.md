@@ -46,14 +46,29 @@ This document describes every artifact and CI pattern the collector detects, whi
 
 Member activity scores are based on the percentage of team members who have AI co-authored commits. For example, if 3 out of 5 members have Claude co-authored commits, the weight contribution is scaled by 3/5 = 60%.
 
+## Branch Scanning
+
+The collector scans all **active branches** (branches with a commit within the last 90 days). Stale branches are excluded to avoid false signals from abandoned work.
+
+Artifacts and CI patterns are weighted by branch type:
+
+| Branch Type | Weight | Rationale |
+|---|---|---|
+| Default branch (e.g., `main`) | 0.5 | Artifact may have been added long ago and could be stale |
+| Active feature branch | 0.8 | Indicates current, active AI tool adoption |
+
+For each artifact/pattern per project, the **highest weight** across all active branches is used. For example, if `CLAUDE.md` exists on both `main` (0.5) and `feat/add-ai` (0.8), the weight is 0.8.
+
 ## Scoring Formula
 
 For each skill, the score is calculated as:
 
 ```
-per_project_score = min(100, (sum of weights for found artifacts) / (sum of all weights for that skill) × 100)
+per_project_score = min(100, (sum of (mapping_weight × branch_weight) for found artifacts) / (sum of all mapping weights for that skill) × 100)
 final_score = round(average of per_project_score across all team projects)
 ```
+
+When scan results use boolean values (True/False), True is treated as weight 1.0 for backwards compatibility.
 
 ### Worked Example
 

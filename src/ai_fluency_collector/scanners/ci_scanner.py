@@ -155,16 +155,13 @@ def _check_deployment_gates(ci_config: dict) -> bool:
 class CIScanner:
     """Scans GitLab projects for CI pipeline patterns in .gitlab-ci.yml."""
 
-    def __init__(self, client: GitLabClient) -> None:
+    def __init__(self, client: GitLabClient, active_days: int = 90) -> None:
         self.client = client
+        self.active_days = active_days
 
-    def scan_project(self, project_path: str) -> dict[str, bool]:
-        """Scan a project's .gitlab-ci.yml for CI patterns.
-
-        Returns dict of {pattern_id: bool}. If no .gitlab-ci.yml exists,
-        all patterns are False (no error).
-        """
-        content = self.client.get_file_content(project_path, ".gitlab-ci.yml")
+    def _scan_branch(self, project_path: str, ref: str) -> dict[str, bool]:
+        """Scan a single branch's .gitlab-ci.yml for CI patterns."""
+        content = self.client.get_file_content(project_path, ".gitlab-ci.yml", ref=ref)
         if content is None:
             return {pid: False for pid in CI_PATTERN_IDS}
 
@@ -196,3 +193,35 @@ class CIScanner:
             "code-coverage": _check_coverage(ci_config),
             "deployment-gates": _check_deployment_gates(ci_config),
         }
+
+    def scan_project(self, project_path: str) -> dict[str, float]:
+        """Scan a project's .gitlab-ci.yml across all active branches.
+
+        Returns dict of {pattern_id: weight} where weight is the highest
+        branch weight where the pattern was found (0.0 if not found).
+        Default branch = 0.5, active feature branch = 0.8.
+        """
+        from ai_fluency_collector.scanners.artifact_scanner import (
+            DEFAULT_BRANCH_WEIGHT,
+            FEATURE_BRANCH_WEIGHT,
+            _get_active_branches,
+        )
+
+        active_branches = _get_active_branches(self.client, project_path, self.active_days)
+
+        if not active_branches:
+            active_branches = [{"name": "HEAD", "weight": DEFAULT_BRANCH_WEIGHT}]
+
+        results: dict[str, float] = {pid: 0.0 for pid in CI_PATTERN_IDS}
+
+        for branch in active_branches:
+            branch_results = self._scan_branch(project_path, branch["name"])
+            for pid, found in branch_results.items():
+                if found:
+                    results[pid] = max(results[pid], branch["weight"])
+
+            # If all patterns already at max weight, stop early
+            if all(v >= FEATURE_BRANCH_WEIGHT for v in results.values()):
+                break
+
+        return results

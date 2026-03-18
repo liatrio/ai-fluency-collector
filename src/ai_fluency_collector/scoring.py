@@ -137,14 +137,17 @@ def _get_artifact_name(artifact_id: str) -> str:
 
 
 def calculate_scores(
-    scan_results: list[dict[str, bool]],
+    scan_results: list[dict[str, bool | float]],
     mappings: list[dict],
     artifact_names: dict[str, str] | None = None,
 ) -> list[dict]:
     """Calculate weighted skill scores from scan results across multiple projects.
 
     Args:
-        scan_results: List of per-project dicts {artifact_id: bool}.
+        scan_results: List of per-project dicts {artifact_id: bool_or_float}.
+            Values can be bool (True/False) or float (0.0 = not found,
+            0.5 = default branch, 0.8 = feature branch). Float values
+            scale the mapping weight by the branch weight.
         mappings: List of mapping dicts with artifact_id, skill_id, weight.
         artifact_names: Optional dict of {artifact_id: display_name} for evidence.
 
@@ -174,7 +177,13 @@ def calculate_scores(
             total_weight = 0.0
             for m in skill_maps:
                 total_weight += m["weight"]
-                if project_result.get(m["artifact_id"], False):
+                value = project_result.get(m["artifact_id"], False)
+                if isinstance(value, (int, float)) and value > 0:
+                    # Float: scale mapping weight by branch weight
+                    found_weight += m["weight"] * value
+                    artifact_counts[m["artifact_id"]] += 1
+                elif value is True:
+                    # Bool True: full mapping weight (backwards compat)
                     found_weight += m["weight"]
                     artifact_counts[m["artifact_id"]] += 1
             if total_weight > 0:

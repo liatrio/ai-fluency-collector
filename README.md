@@ -104,7 +104,7 @@ ai-fluency-collector --config <path> [--period <YYYY-WNN>]
 
 ### Repo Artifacts
 
-The collector checks each project's default branch for these files and directories:
+The collector checks all active branches (commits within last 90 days) for these files and directories. Artifacts found on feature branches are weighted higher (0.8) than those on the default branch (0.5), since feature branch presence indicates active AI tool adoption:
 
 | Artifact | What It Indicates |
 |---|---|
@@ -119,7 +119,7 @@ The collector checks each project's default branch for these files and directori
 
 ### CI Patterns
 
-The collector parses `.gitlab-ci.yml` (including `include` template directives) for:
+The collector parses `.gitlab-ci.yml` across all active branches (including `include` template directives) for:
 
 | Pattern | What It Indicates |
 |---|---|
@@ -255,6 +255,5 @@ The collector validates all preconditions before making any API calls and provid
 ## Limitations
 
 - GitLab.com (SaaS) only — self-hosted GitLab is not supported
-- Scans the default branch only, not feature branches
 - One team per config file — run multiple times for multiple teams
 - Produces a JSON file for manual import — no automatic upload

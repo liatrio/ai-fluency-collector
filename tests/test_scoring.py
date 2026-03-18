@@ -115,3 +115,35 @@ def test_score_capped_at_100():
     results = [{"a": True}]
     signals = calculate_scores(results, mappings)
     assert signals[0]["score"] == 100
+
+
+def test_float_weight_feature_branch():
+    """Float value (feature branch weight 0.8) scales the mapping weight."""
+    mappings = [{"artifact_id": "claude-md", "skill_id": "cq-context", "weight": 1.0}]
+    results = [{"claude-md": 0.8}]
+    signals = calculate_scores(results, mappings)
+    assert signals[0]["score"] == 80
+
+
+def test_float_weight_default_branch():
+    """Float value (default branch weight 0.5) scales the mapping weight."""
+    mappings = [{"artifact_id": "claude-md", "skill_id": "cq-context", "weight": 1.0}]
+    results = [{"claude-md": 0.5}]
+    signals = calculate_scores(results, mappings)
+    assert signals[0]["score"] == 50
+
+
+def test_float_zero_produces_no_signal():
+    """Float 0.0 means not found, should produce no signal."""
+    mappings = [{"artifact_id": "claude-md", "skill_id": "cq-context", "weight": 1.0}]
+    results = [{"claude-md": 0.0}]
+    signals = calculate_scores(results, mappings)
+    assert signals == []
+
+
+def test_feature_branch_scores_higher_than_default():
+    """Artifact on feature branch (0.8) scores higher than default branch (0.5)."""
+    mappings = [{"artifact_id": "claude-md", "skill_id": "cq-context", "weight": 1.0}]
+    default_signals = calculate_scores([{"claude-md": 0.5}], mappings)
+    feature_signals = calculate_scores([{"claude-md": 0.8}], mappings)
+    assert feature_signals[0]["score"] > default_signals[0]["score"]

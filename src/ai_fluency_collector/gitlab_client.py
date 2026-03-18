@@ -44,15 +44,15 @@ class GitLabClient:
             )
         resp.raise_for_status()
 
-    def check_file_exists(self, project_path: str, file_path: str) -> bool:
-        """Check if a file exists in a project's default branch.
+    def check_file_exists(self, project_path: str, file_path: str, ref: str = "HEAD") -> bool:
+        """Check if a file exists in a project on a given ref.
 
         Uses HEAD on the Repository Files API.
         """
         encoded_project = self._encode_project(project_path)
         encoded_file = quote(file_path, safe="")
         url = self._api_url(f"/projects/{encoded_project}/repository/files/{encoded_file}")
-        resp = self.session.head(url, params={"ref": "HEAD"})
+        resp = self.session.head(url, params={"ref": ref})
         if resp.status_code == 200:
             return True
         if resp.status_code == 404:
@@ -70,11 +70,11 @@ class GitLabClient:
         resp.raise_for_status()
         return False
 
-    def check_directory_exists(self, project_path: str, dir_path: str) -> bool:
+    def check_directory_exists(self, project_path: str, dir_path: str, ref: str = "HEAD") -> bool:
         """Check if a directory exists in a project using the Repository Tree API."""
         encoded_project = self._encode_project(project_path)
         url = self._api_url(f"/projects/{encoded_project}/repository/tree")
-        resp = self.session.get(url, params={"path": dir_path, "ref": "HEAD", "per_page": 1})
+        resp = self.session.get(url, params={"path": dir_path, "ref": ref, "per_page": 1})
         if resp.status_code == 200:
             items = resp.json()
             return len(items) > 0
@@ -93,15 +93,15 @@ class GitLabClient:
         resp.raise_for_status()
         return False
 
-    def get_file_content(self, project_path: str, file_path: str) -> str | None:
-        """Fetch a file's content from a project's default branch.
+    def get_file_content(self, project_path: str, file_path: str, ref: str = "HEAD") -> str | None:
+        """Fetch a file's content from a project on a given ref.
 
         Returns None if the file does not exist.
         """
         encoded_project = self._encode_project(project_path)
         encoded_file = quote(file_path, safe="")
         url = self._api_url(f"/projects/{encoded_project}/repository/files/{encoded_file}/raw")
-        resp = self.session.get(url, params={"ref": "HEAD"})
+        resp = self.session.get(url, params={"ref": ref})
         if resp.status_code == 200:
             return resp.text
         if resp.status_code == 404:
@@ -118,6 +118,38 @@ class GitLabClient:
             )
         resp.raise_for_status()
         return None
+
+    def get_branches(self, project_path: str) -> list[dict]:
+        """Get all branches for a project.
+
+        Returns list of branch dicts with 'name', 'default', and
+        'commit.committed_date' fields.
+        """
+        encoded_project = self._encode_project(project_path)
+        url = self._api_url(f"/projects/{encoded_project}/repository/branches")
+        results: list[dict] = []
+        page = 1
+        while True:
+            resp = self.session.get(url, params={"per_page": 100, "page": page})
+            if resp.status_code == 404:
+                return []
+            if resp.status_code == 401:
+                raise GitLabAuthError(
+                    "GitLab authentication failed. "
+                    "Check that GITLAB_TOKEN is valid and has read_api scope."
+                )
+            if resp.status_code == 403:
+                raise GitLabAccessError(
+                    f"Access denied to project '{project_path}'. "
+                    "Check that the token has access to this project."
+                )
+            resp.raise_for_status()
+            items = resp.json()
+            if not items:
+                break
+            results.extend(items)
+            page += 1
+        return results
 
     def get_user(self, username: str) -> dict:
         """Look up a GitLab user by username.
