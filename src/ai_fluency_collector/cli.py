@@ -56,7 +56,12 @@ def validate_period(period: str) -> str:
     default=None,
     help="Survey period in YYYY-WNN format (defaults to current ISO week).",
 )
-def main(config_path: str, period: str | None) -> None:
+@click.option(
+    "--gitlab-url",
+    default="https://gitlab.com",
+    help="GitLab instance URL (defaults to https://gitlab.com).",
+)
+def main(config_path: str, period: str | None, gitlab_url: str) -> None:
     """Scan GitLab repositories for AI adoption signals."""
     # 1. Load and validate config
     try:
@@ -80,7 +85,7 @@ def main(config_path: str, period: str | None) -> None:
         )
 
     # 4. Validate token against GitLab API
-    client = GitLabClient(token)
+    client = GitLabClient(token, base_url=gitlab_url)
     try:
         client.validate_token()
     except GitLabAuthError as e:
@@ -89,6 +94,7 @@ def main(config_path: str, period: str | None) -> None:
     # 5. Print startup banner
     output_file = f"{team.code}-{period}.json"
     click.echo("AI Fluency Collector")
+    click.echo(f"  GitLab:   {gitlab_url}")
     click.echo(f"  Team:     {team.name}")
     click.echo(f"  Members:  {len(team.members)}")
     click.echo(f"  Projects: {len(team.projects)}")
