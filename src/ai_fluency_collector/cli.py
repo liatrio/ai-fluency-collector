@@ -58,10 +58,16 @@ def validate_period(period: str) -> str:
 )
 @click.option(
     "--gitlab-url",
-    default="https://gitlab.com",
-    help="GitLab instance URL (defaults to https://gitlab.com).",
+    default=None,
+    help="GitLab instance URL (overrides config value; defaults to https://gitlab.com).",
 )
-def main(config_path: str, period: str | None, gitlab_url: str) -> None:
+@click.option(
+    "--validate",
+    is_flag=True,
+    default=False,
+    help="Test the connection, list accessible projects, and exit without scanning.",
+)
+def main(config_path: str, period: str | None, gitlab_url: str | None, validate: bool) -> None:
     """Scan GitLab repositories for AI adoption signals."""
     # 1. Load and validate config
     try:
@@ -71,30 +77,51 @@ def main(config_path: str, period: str | None, gitlab_url: str) -> None:
     except ValueError as e:
         raise click.ClickException(str(e)) from e
 
-    # 2. Validate period
+    # 2. Resolve gitlab_url: CLI flag overrides config value
+    effective_gitlab_url = gitlab_url if gitlab_url is not None else team.gitlab_url
+
+    # 3. Validate period
     if period is None:
         period = current_iso_week()
     else:
         validate_period(period)
 
-    # 3. Check GITLAB_TOKEN
+    # 4. Check GITLAB_TOKEN
     token = os.environ.get("GITLAB_TOKEN")
     if not token:
         raise click.ClickException(
             "GITLAB_TOKEN environment variable is not set. Export a token with read_api scope."
         )
 
-    # 4. Validate token against GitLab API
-    client = GitLabClient(token, base_url=gitlab_url)
+    # 5. Validate token against GitLab API
+    client = GitLabClient(token, base_url=effective_gitlab_url)
     try:
         client.validate_token()
     except GitLabAuthError as e:
         raise click.ClickException(str(e)) from e
 
-    # 5. Print startup banner
+    # 6. --validate mode: test connection, list projects, and exit
+    if validate:
+        click.echo("AI Fluency Collector — Validation Mode")
+        click.echo(f"  GitLab:   {effective_gitlab_url}")
+        click.echo(f"  Team:     {team.name}")
+        click.echo("  Token:    valid")
+        click.echo()
+        click.echo("Checking project access...")
+        for project in team.projects:
+            try:
+                client.get_branches(project)
+                click.echo(f"  {project}: accessible")
+            except (GitLabAccessError, GitLabAuthError) as e:
+                click.echo(f"  {project}: ERROR - {e}")
+        click.echo()
+        click.echo("Validation complete.")
+        return
+
+    # 7. Print startup banner
     output_file = f"{team.code}-{period}.json"
     click.echo("AI Fluency Collector")
-    click.echo(f"  GitLab:   {gitlab_url}")
+    click.echo(f"  GitLab:   {effective_gitlab_url}")
     click.echo(f"  Team:     {team.name}")
     click.echo(f"  Members:  {len(team.members)}")
     click.echo(f"  Projects: {len(team.projects)}")

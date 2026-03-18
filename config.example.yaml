@@ -10,6 +10,10 @@ team:
   # Short identifier used in output filenames (e.g., my-team-2026-W12.json)
   code: "my-team"
 
+  # GitLab instance URL (optional, defaults to https://gitlab.com)
+  # Uncomment and change for self-hosted GitLab instances:
+  # gitlab_url: "https://gitlab.example.com"
+
   # List of team member GitLab usernames
   # Used to discover AI adoption signals across all repos members touch
   # (e.g., co-authored commits with Claude, Copilot, Cursor)
@@ -20,7 +24,14 @@ team:
   # List of GitLab project paths to scan (namespace/project format)
   # These are scanned for AI tool artifacts and CI patterns
   # Must be accessible with your GITLAB_TOKEN
+  #
+  # Use the path as it appears in your browser URL:
+  #   https://gitlab.com/my-group/project-one  →  "my-group/project-one"
+  #
+  # For projects inside nested subgroups, include the full path:
+  #   https://gitlab.com/my-org/platform/backend/api  →  "my-org/platform/backend/api"
   projects:
     - "my-group/project-one"
     - "my-group/project-two"
     - "my-group/subgroup/project-three"
+    - "my-org/platform/backend/api"

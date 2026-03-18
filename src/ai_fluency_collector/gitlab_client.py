@@ -34,12 +34,17 @@ class GitLabClient:
     def validate_token(self) -> None:
         """Verify the token is valid by calling GET /user.
 
-        Raises GitLabAuthError on 401.
+        Raises GitLabAuthError on 401 or connection errors.
         """
-        resp = self.session.get(self._api_url("/user"))
+        try:
+            resp = self.session.get(self._api_url("/user"))
+        except (requests.ConnectionError, requests.Timeout) as e:
+            raise GitLabAuthError(
+                f"Could not connect to {self.base_url}. Check the gitlab_url in your config."
+            ) from e
         if resp.status_code == 401:
             raise GitLabAuthError(
-                "GitLab authentication failed. "
+                f"GitLab authentication failed at {self.base_url}. "
                 "Check that GITLAB_TOKEN is valid and has read_api scope."
             )
         resp.raise_for_status()

@@ -15,13 +15,27 @@ It produces a single JSON file with weighted skill scores that can be imported d
 ## Prerequisites
 
 - Python 3.10+
-- A GitLab.com personal access token with `read_api` scope
+- A GitLab personal access token with `read_api` scope
 
 ## Installation
+
+### Recommended: pipx (isolated install)
 
 ```bash
 git clone git@github.com:liatrio/ai-fluency-collector.git
 cd ai-fluency-collector
+pipx install .
+```
+
+This installs the `ai-fluency-collector` command globally in an isolated environment, so it won't conflict with other Python packages.
+
+### Alternative: pip with venv
+
+```bash
+git clone git@github.com:liatrio/ai-fluency-collector.git
+cd ai-fluency-collector
+python -m venv .venv
+source .venv/bin/activate
 pip install -e .
 ```
 
@@ -83,13 +97,15 @@ Upload the generated JSON file to the ai-fluency application's Import page.
 ## CLI Options
 
 ```
-ai-fluency-collector --config <path> [--period <YYYY-WNN>]
+ai-fluency-collector --config <path> [--period <YYYY-WNN>] [--gitlab-url <URL>] [--validate]
 ```
 
 | Flag | Required | Description |
 |---|---|---|
 | `--config` | Yes | Path to team configuration YAML file |
 | `--period` | No | Survey period override (defaults to current ISO week) |
+| `--gitlab-url` | No | GitLab instance URL (overrides `gitlab_url` in config) |
+| `--validate` | No | Test connection, list accessible projects, and exit without scanning |
 
 ## Config File Reference
 
@@ -99,6 +115,7 @@ ai-fluency-collector --config <path> [--period <YYYY-WNN>]
 | `team.code` | Yes | Short identifier used in output filenames |
 | `team.members` | Yes | List of GitLab usernames |
 | `team.projects` | Yes | List of GitLab project paths (`namespace/project` format) |
+| `team.gitlab_url` | No | GitLab instance URL (defaults to `https://gitlab.com`) |
 
 ## Signal Sources
 
@@ -223,7 +240,7 @@ Summary
 ## Development
 
 ```bash
-# Install with dev dependencies
+# Install with dev dependencies (use a venv for development)
 pip install -e ".[dev]"
 
 # Run tests
@@ -247,13 +264,14 @@ The collector validates all preconditions before making any API calls and provid
 | Invalid YAML | `Failed to parse {path}: {details}` |
 | Missing required field | `Missing required field: team.code` |
 | Token not set | `GITLAB_TOKEN environment variable is not set. Export a token with read_api scope.` |
-| Token invalid | `GitLab authentication failed. Check that GITLAB_TOKEN is valid and has read_api scope.` |
+| Token invalid | `GitLab authentication failed at {url}. Check that GITLAB_TOKEN is valid and has read_api scope.` |
+| Connection failed | `Could not connect to {url}. Check the gitlab_url in your config.` |
 | Invalid period | `Invalid period format: {value}. Expected YYYY-WNN (e.g. 2026-W12)` |
 | Project inaccessible | `Access denied to project '{path}'. Check that the token has access to this project.` |
 | Member not found | `GitLab user '{username}' not found. Check the username in your config.` |
 
 ## Limitations
 
-- GitLab.com (SaaS) only — self-hosted GitLab is not supported
+- Supports GitLab.com and self-hosted GitLab instances (set `gitlab_url` in config)
 - One team per config file — run multiple times for multiple teams
 - Produces a JSON file for manual import — no automatic upload

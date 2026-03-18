@@ -28,6 +28,38 @@ def test_load_valid_config(valid_config):
     assert team.code == "test-team"
     assert team.members == ["alice.smith", "bob.jones"]
     assert team.projects == ["group/project-one", "group/project-two"]
+    assert team.gitlab_url == "https://gitlab.com"
+
+
+def test_gitlab_url_from_config(tmp_path):
+    config = {
+        "team": {
+            "name": "Test Team",
+            "code": "test-team",
+            "gitlab_url": "https://gitlab.example.com",
+            "members": ["alice.smith"],
+            "projects": ["group/project-one"],
+        }
+    }
+    path = tmp_path / "team.yaml"
+    path.write_text(yaml.dump(config))
+    team = load_config(str(path))
+    assert team.gitlab_url == "https://gitlab.example.com"
+
+
+def test_gitlab_url_defaults_when_missing(tmp_path):
+    config = {
+        "team": {
+            "name": "Test Team",
+            "code": "test-team",
+            "members": ["alice.smith"],
+            "projects": ["group/project-one"],
+        }
+    }
+    path = tmp_path / "team.yaml"
+    path.write_text(yaml.dump(config))
+    team = load_config(str(path))
+    assert team.gitlab_url == "https://gitlab.com"
 
 
 def test_missing_file():

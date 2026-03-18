@@ -116,7 +116,8 @@ def test_invalid_gitlab_token(mock_client_cls, tmp_path, monkeypatch):
 
     monkeypatch.setenv("GITLAB_TOKEN", "bad-token")
     mock_client_cls.return_value.validate_token.side_effect = GitLabAuthError(
-        "GitLab authentication failed. Check that GITLAB_TOKEN is valid and has read_api scope."
+        "GitLab authentication failed at https://gitlab.com. "
+        "Check that GITLAB_TOKEN is valid and has read_api scope."
     )
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
@@ -139,3 +140,70 @@ def test_member_scanning_in_output(mock_client_cls, mock_member_cls, tmp_path, m
     assert result.exit_code == 0
     assert "Scanning member activity" in result.output
     assert "alice.smith" in result.output
+
+
+@patch("ai_fluency_collector.cli.GitLabClient")
+def test_validate_flag(mock_client_cls, tmp_path, monkeypatch):
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    client = _setup_mock_client(mock_client_cls)
+    client.get_branches.return_value = [{"name": "main"}]
+    config_path = _write_valid_config(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(main, ["--config", config_path, "--validate"])
+    assert result.exit_code == 0
+    assert "Validation Mode" in result.output
+    assert "Token:    valid" in result.output
+    assert "group/project-one: accessible" in result.output
+    assert "Validation complete" in result.output
+    # Should NOT contain scanning output
+    assert "Scanning for repo artifacts" not in result.output
+
+
+def _write_config_with_gitlab_url(tmp_path, gitlab_url):
+    config = {
+        "team": {
+            "name": "Test Team",
+            "code": "test-team",
+            "gitlab_url": gitlab_url,
+            "members": ["alice.smith"],
+            "projects": ["group/project-one"],
+        }
+    }
+    path = tmp_path / "team.yaml"
+    path.write_text(yaml.dump(config))
+    return str(path)
+
+
+@patch("ai_fluency_collector.cli.MemberScanner")
+@patch("ai_fluency_collector.cli.GitLabClient")
+def test_gitlab_url_from_config(mock_client_cls, mock_member_cls, tmp_path, monkeypatch):
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    _setup_mock_client(mock_client_cls)
+    mock_member_cls.return_value.scan_all_members.return_value = [
+        MemberResult(username="alice.smith")
+    ]
+    config_path = _write_config_with_gitlab_url(tmp_path, "https://gitlab.example.com")
+    runner = CliRunner()
+    result = runner.invoke(main, ["--config", config_path, "--period", "2026-W12"])
+    assert result.exit_code == 0
+    # Client should be constructed with the config URL
+    mock_client_cls.assert_called_once_with("test-token", base_url="https://gitlab.example.com")
+
+
+@patch("ai_fluency_collector.cli.MemberScanner")
+@patch("ai_fluency_collector.cli.GitLabClient")
+def test_gitlab_url_cli_overrides_config(mock_client_cls, mock_member_cls, tmp_path, monkeypatch):
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    _setup_mock_client(mock_client_cls)
+    mock_member_cls.return_value.scan_all_members.return_value = [
+        MemberResult(username="alice.smith")
+    ]
+    config_path = _write_config_with_gitlab_url(tmp_path, "https://gitlab.example.com")
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["--config", config_path, "--period", "2026-W12", "--gitlab-url", "https://custom.gl"],
+    )
+    assert result.exit_code == 0
+    # CLI flag should take precedence
+    mock_client_cls.assert_called_once_with("test-token", base_url="https://custom.gl")

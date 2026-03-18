@@ -12,6 +12,7 @@ class TeamConfig:
     code: str
     members: list[str] = field(default_factory=list)
     projects: list[str] = field(default_factory=list)
+    gitlab_url: str = "https://gitlab.com"
 
 
 def load_config(path: str) -> TeamConfig:
@@ -61,9 +62,14 @@ def load_config(path: str) -> TeamConfig:
     if not isinstance(projects, list) or len(projects) == 0:
         raise ValueError("team.projects must be a non-empty list")
 
+    gitlab_url = team.get("gitlab_url", "https://gitlab.com")
+    if not isinstance(gitlab_url, str) or not gitlab_url:
+        raise ValueError("team.gitlab_url must be a non-empty string")
+
     return TeamConfig(
         name=team["name"],
         code=team["code"],
         members=members,
         projects=projects,
+        gitlab_url=gitlab_url,
     )
