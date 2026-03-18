@@ -7,6 +7,9 @@ from datetime import date
 import click
 
 from ai_fluency_collector.config import load_config
+from ai_fluency_collector.gitlab_client import GitLabAccessError, GitLabAuthError, GitLabClient
+from ai_fluency_collector.scanners.artifact_scanner import ARTIFACT_DEFINITIONS, ArtifactScanner
+from ai_fluency_collector.scoring import ARTIFACT_SKILL_MAPPINGS, calculate_scores
 
 PERIOD_PATTERN = re.compile(r"^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$")
 
@@ -62,7 +65,14 @@ def main(config_path: str, period: str | None) -> None:
             "GITLAB_TOKEN environment variable is not set. Export a token with read_api scope."
         )
 
-    # 4. Print startup banner
+    # 4. Validate token against GitLab API
+    client = GitLabClient(token)
+    try:
+        client.validate_token()
+    except GitLabAuthError as e:
+        raise click.ClickException(str(e)) from e
+
+    # 5. Print startup banner
     output_file = f"{team.code}-{period}.json"
     click.echo("AI Fluency Collector")
     click.echo(f"  Team:     {team.name}")
@@ -71,4 +81,33 @@ def main(config_path: str, period: str | None) -> None:
     click.echo(f"  Output:   {output_file}")
     click.echo()
 
-    # Scanning will be wired in Tasks 2.0+
+    # 6. Scan for repo artifacts
+    click.echo("Scanning for repo artifacts...")
+    scanner = ArtifactScanner(client)
+    all_artifact_results: list[dict[str, bool]] = []
+
+    for project in team.projects:
+        try:
+            result = scanner.scan_project(project)
+        except (GitLabAccessError, GitLabAuthError) as e:
+            raise click.ClickException(str(e)) from e
+
+        all_artifact_results.append(result)
+        found = [aid for aid, present in result.items() if present]
+        if found:
+            names = []
+            for aid in found:
+                for defn in ARTIFACT_DEFINITIONS:
+                    if defn["id"] == aid:
+                        names.append(defn["name"])
+                        break
+            click.echo(f"  {project}: {', '.join(names)}")
+        else:
+            click.echo(f"  {project}: no artifacts found")
+
+    # 7. Calculate artifact scores
+    artifact_signals = calculate_scores(all_artifact_results, ARTIFACT_SKILL_MAPPINGS)
+    click.echo(f"  → {len(artifact_signals)} artifact signals detected")
+    click.echo()
+
+    # CI scanning and output will be wired in Tasks 3.0 and 4.0

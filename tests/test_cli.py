@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import yaml
 from click.testing import CliRunner
 
@@ -64,7 +66,8 @@ def test_invalid_period_week_zero(tmp_path, monkeypatch):
     assert "Invalid period format" in result.output
 
 
-def test_startup_banner(tmp_path, monkeypatch):
+@patch("ai_fluency_collector.cli.GitLabClient")
+def test_startup_banner(mock_client_cls, tmp_path, monkeypatch):
     monkeypatch.setenv("GITLAB_TOKEN", "test-token")
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
@@ -74,9 +77,11 @@ def test_startup_banner(tmp_path, monkeypatch):
     assert "1" in result.output  # 1 project
     assert "2026-W12" in result.output
     assert "test-team-2026-W12.json" in result.output
+    mock_client_cls.return_value.validate_token.assert_called_once()
 
 
-def test_default_period_uses_current_week(tmp_path, monkeypatch):
+@patch("ai_fluency_collector.cli.GitLabClient")
+def test_default_period_uses_current_week(mock_client_cls, tmp_path, monkeypatch):
     monkeypatch.setenv("GITLAB_TOKEN", "test-token")
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
@@ -84,3 +89,18 @@ def test_default_period_uses_current_week(tmp_path, monkeypatch):
     assert result.exit_code == 0
     # Should contain a period in YYYY-WNN format
     assert "-W" in result.output
+
+
+@patch("ai_fluency_collector.cli.GitLabClient")
+def test_invalid_gitlab_token(mock_client_cls, tmp_path, monkeypatch):
+    from ai_fluency_collector.gitlab_client import GitLabAuthError
+
+    monkeypatch.setenv("GITLAB_TOKEN", "bad-token")
+    mock_client_cls.return_value.validate_token.side_effect = GitLabAuthError(
+        "GitLab authentication failed. Check that GITLAB_TOKEN is valid and has read_api scope."
+    )
+    config_path = _write_valid_config(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(main, ["--config", config_path, "--period", "2026-W12"])
+    assert result.exit_code != 0
+    assert "authentication failed" in result.output
