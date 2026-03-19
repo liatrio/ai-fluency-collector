@@ -55,6 +55,16 @@ def _slugify(text: str) -> str:
     return slug.strip("-")
 
 
+AFC_BANNER = r"""
+     ___       _______ ______
+    /   \     |   ____/      |
+   /  ^  \    |  |_  |  ,----'
+  /  /_\  \   |   _] |  |
+ /  _____  \  |  |   |  `----.
+/__/     \__\ |__|    \______|
+"""
+
+
 @click.group()
 def main():
     """AI Fluency Collector - Scan GitLab repositories for AI adoption signals."""
@@ -130,7 +140,8 @@ def scan(
 
     # 6. --validate mode: test connection, list projects, and exit
     if validate:
-        click.echo("AI Fluency Collector — Validation Mode")
+        click.echo(AFC_BANNER)
+        click.echo("Validation Mode")
         click.echo(f"  GitLab:   {effective_gitlab_url}")
         click.echo(f"  Team:     {team.name}")
         click.echo("  Token:    valid")
@@ -148,7 +159,7 @@ def scan(
 
     # 7. Print startup banner
     output_file = f"{team.code}-{period}.json"
-    click.echo("AI Fluency Collector")
+    click.echo(AFC_BANNER)
     click.echo(f"  GitLab:   {effective_gitlab_url}")
     click.echo(f"  Team:     {team.name}")
     click.echo(f"  Members:  {len(team.members)}")
@@ -268,7 +279,8 @@ def scan(
 @main.command()
 def init() -> None:
     """Interactive setup wizard to create a team config YAML file."""
-    click.echo("AI Fluency Collector — Team Setup Wizard")
+    click.echo(AFC_BANNER)
+    click.echo("Team Setup Wizard")
     click.echo()
 
     # Step 1: Basics
