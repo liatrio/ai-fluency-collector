@@ -169,6 +169,106 @@ def test_validate_flag(mock_client_cls, tmp_path, monkeypatch):
     assert "Scanning for repo artifacts" not in result.output
 
 
+@patch("ai_fluency_collector.cli.MemberScanner")
+@patch("ai_fluency_collector.cli.GitLabClient")
+def test_from_to_produces_one_file_per_week(
+    mock_client_cls, mock_member_cls, tmp_path, monkeypatch
+):
+    """--from/--to range produces one output file per ISO week."""
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    _setup_mock_client(mock_client_cls)
+    mock_member_cls.return_value.scan_all_members.return_value = [
+        MemberResult(username="alice.smith")
+    ]
+    config_path = _write_valid_config(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["scan", "--config", config_path, "--from", "2026-03-09", "--to", "2026-03-22"],
+    )
+    assert result.exit_code == 0, result.output
+    # Two weeks: W11 and W12
+    assert "2026-W11" in result.output
+    assert "2026-W12" in result.output
+    assert "2 weeks" in result.output
+    assert "Scanning week" in result.output
+
+
+@patch("ai_fluency_collector.cli.MemberScanner")
+@patch("ai_fluency_collector.cli.GitLabClient")
+def test_from_to_banner_shows_range(mock_client_cls, mock_member_cls, tmp_path, monkeypatch):
+    """Startup banner shows the week range when --from/--to is used."""
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    _setup_mock_client(mock_client_cls)
+    mock_member_cls.return_value.scan_all_members.return_value = [
+        MemberResult(username="alice.smith")
+    ]
+    config_path = _write_valid_config(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["scan", "--config", config_path, "--from", "2026-03-16", "--to", "2026-03-22"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "→" in result.output
+
+
+def test_from_without_to_errors(tmp_path, monkeypatch):
+    """--from without --to is rejected."""
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    config_path = _write_valid_config(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(main, ["scan", "--config", config_path, "--from", "2026-01-01"])
+    assert result.exit_code != 0
+    assert "--from and --to must be used together" in result.output
+
+
+def test_to_without_from_errors(tmp_path, monkeypatch):
+    """--to without --from is rejected."""
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    config_path = _write_valid_config(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(main, ["scan", "--config", config_path, "--to", "2026-03-22"])
+    assert result.exit_code != 0
+    assert "--from and --to must be used together" in result.output
+
+
+def test_from_to_and_period_mutually_exclusive(tmp_path, monkeypatch):
+    """--from/--to and --period cannot be used together."""
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    config_path = _write_valid_config(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        [
+            "scan",
+            "--config",
+            config_path,
+            "--period",
+            "2026-W12",
+            "--from",
+            "2026-03-01",
+            "--to",
+            "2026-03-22",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.output
+
+
+def test_from_after_to_errors(tmp_path, monkeypatch):
+    """--from date later than --to is rejected."""
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    config_path = _write_valid_config(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["scan", "--config", config_path, "--from", "2026-03-22", "--to", "2026-03-01"],
+    )
+    assert result.exit_code != 0
+    assert "--from must be earlier" in result.output
+
+
 def _write_config_with_gitlab_url(tmp_path, gitlab_url):
     config = {
         "team": {
