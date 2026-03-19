@@ -1,21 +1,28 @@
 # AI Fluency Collector
 
-A CLI tool that scans GitLab repositories and team member activity for evidence of AI adoption, producing a JSON file compatible with the [ai-fluency](https://github.com/liatrio/ai-fluency) application's import format.
+A CLI tool that scans GitLab and GitHub repositories and team member activity for evidence of AI adoption, producing a JSON file compatible with the [ai-fluency](https://github.com/liatrio/ai-fluency) application's import format.
 
 ## What It Does
 
-The collector gathers objective, measurable AI adoption signals from three sources:
+The collector gathers objective, measurable AI adoption signals from two scan modes:
 
+**GitLab (`afc scan`)**:
 1. **Repo Artifacts** — Detects AI tool configuration files in your team's GitLab projects
 2. **CI Patterns** — Analyzes `.gitlab-ci.yml` for security, AI, and deployment pipeline patterns
 3. **Member Activity** — Discovers AI co-authored commits across all repos your team members touch
+4. **MR Review Signals** — Measures team review behavior (LGTM rate, review depth, self-review rate)
+
+**GitHub (`afc github-scan`)**:
+1. **Repo Artifacts** — Detects AI tool configuration files with tiered scoring (depth of adoption matters)
+2. **PR Review Signals** — Measures review behavior and AI co-author rates across team PRs
 
 It produces a single JSON file with weighted skill scores that can be imported directly into the ai-fluency application.
 
 ## Prerequisites
 
 - Python 3.10+
-- A GitLab personal access token with `read_api` scope
+- A GitLab personal access token with `read_api` scope (for `afc scan`)
+- A GitHub personal access token with `repo` and `read:user` scopes (for `afc github-scan`)
 
 ## Installation
 
@@ -54,7 +61,9 @@ pip install -e .
 
 ## Quick Start
 
-### 1. Create a GitLab token
+### GitLab
+
+#### 1. Create a GitLab token
 
 Generate a [personal access token](https://gitlab.com/-/user_settings/personal_access_tokens) with the `read_api` scope and export it:
 
@@ -62,9 +71,7 @@ Generate a [personal access token](https://gitlab.com/-/user_settings/personal_a
 export GITLAB_TOKEN="glpat-your-token-here"
 ```
 
-### 2. Create a team config
-
-Copy the example config and fill in your team details:
+#### 2. Create a team config
 
 ```bash
 cp config.example.yaml my-team.yaml
@@ -77,31 +84,62 @@ team:
   name: "Platform Engineering"
   code: "platform-eng"
 
-  # GitLab usernames — used to discover AI activity across all repos
   members:
     - "alice.smith"
     - "bob.jones"
     - "carol.williams"
 
-  # GitLab project paths to scan for artifacts and CI patterns
   projects:
     - "my-org/backend-api"
     - "my-org/frontend-app"
     - "my-org/infra/terraform"
 ```
 
-### 3. Run the collector
+#### 3. Run the collector
 
 ```bash
-ai-fluency-collector --config my-team.yaml
+afc scan --config my-team.yaml
 ```
 
-This will:
-- Scan each project for AI tool artifacts (CLAUDE.md, .cursorrules, .mcp.json, etc.)
-- Parse `.gitlab-ci.yml` files for security and AI pipeline patterns
-- Discover repos each member owns or contributes to
-- Search member commits for AI co-author patterns (Claude, Copilot, Cursor)
-- Write a JSON file: `platform-eng-2026-W12.json`
+This scans each project for artifacts, parses CI configs, discovers member repo activity, and writes `platform-eng-2026-W12.json`.
+
+---
+
+### GitHub
+
+#### 1. Create a GitHub token
+
+Generate a [personal access token](https://github.com/settings/tokens) with `repo` and `read:user` scopes and export it:
+
+```bash
+export GITHUB_TOKEN="ghp_your-token-here"
+```
+
+#### 2. Add GitHub repos to your config
+
+```yaml
+team:
+  name: "Platform Engineering"
+  code: "platform-eng"
+
+  members:
+    - "alice-smith"
+    - "bob-jones"
+
+  github_repos:
+    - "my-org/backend-api"
+    - "my-org/frontend-app"
+```
+
+#### 3. Run the GitHub scan
+
+```bash
+afc github-scan --config my-team.yaml
+```
+
+This scans each repo for AI tool artifacts (with tiered scoring) and analyzes PR review behavior, writing `platform-eng-2026-W12.json`.
+
+---
 
 ### 4. Import the output
 
@@ -109,8 +147,10 @@ Upload the generated JSON file to the ai-fluency application's Import page.
 
 ## CLI Options
 
+### `afc scan` (GitLab)
+
 ```
-ai-fluency-collector --config <path> [--period <YYYY-WNN>] [--gitlab-url <URL>] [--validate]
+afc scan --config <path> [--period <YYYY-WNN>] [--gitlab-url <URL>] [--validate] [--usernames <list>]
 ```
 
 | Flag | Required | Description |
@@ -119,6 +159,20 @@ ai-fluency-collector --config <path> [--period <YYYY-WNN>] [--gitlab-url <URL>] 
 | `--period` | No | Survey period override (defaults to current ISO week) |
 | `--gitlab-url` | No | GitLab instance URL (overrides `gitlab_url` in config) |
 | `--validate` | No | Test connection, list accessible projects, and exit without scanning |
+| `--usernames` | No | Comma-separated GitLab usernames (overrides `members` in config) |
+| `--from` / `--to` | No | Date range for multi-week scanning (YYYY-MM-DD) |
+
+### `afc github-scan` (GitHub)
+
+```
+afc github-scan --config <path> [--period <YYYY-WNN>] [--usernames <list>]
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--config` | Yes | Path to team configuration YAML file |
+| `--period` | No | Survey period override (defaults to current ISO week) |
+| `--usernames` | No | Comma-separated GitHub usernames (overrides `members` in config) |
 
 ## Config File Reference
 
@@ -126,13 +180,20 @@ ai-fluency-collector --config <path> [--period <YYYY-WNN>] [--gitlab-url <URL>] 
 |---|---|---|
 | `team.name` | Yes | Display name for the team |
 | `team.code` | Yes | Short identifier used in output filenames |
-| `team.members` | Yes | List of GitLab usernames |
-| `team.projects` | Yes | List of GitLab project paths (`namespace/project` format) |
+| `team.members` | Yes | List of GitLab or GitHub usernames |
+| `team.projects` | No* | List of GitLab project paths (`namespace/project` format) |
+| `team.github_repos` | No* | List of GitHub repos (`owner/repo` format) |
 | `team.gitlab_url` | No | GitLab instance URL (defaults to `https://gitlab.com`) |
+| `team.ci_signals` | No | Custom CI job name overrides (GitLab only) |
+| `team.scan_from` / `team.scan_to` | No | Date range for multi-week scanning, YYYY-MM-DD (GitLab only) |
+
+*At least one of `projects` or `github_repos` must be present.
 
 ## Signal Sources
 
-### Repo Artifacts
+### GitLab Signal Sources
+
+#### Repo Artifacts
 
 The collector checks all active branches (commits within last 90 days) for these files and directories. Artifacts found on feature branches are weighted higher (0.8) than those on the default branch (0.5), since feature branch presence indicates active AI tool adoption:
 
@@ -147,7 +208,7 @@ The collector checks all active branches (commits within last 90 days) for these
 | `AGENTS.md` or `.agents/` | Agent configuration |
 | `.aider.conf.yml`, `.aider.model.settings.yml`, `.aiderignore` | Aider configuration |
 
-### CI Patterns
+#### CI Patterns
 
 The collector parses `.gitlab-ci.yml` across all active branches (including `include` template directives) for:
 
@@ -161,7 +222,7 @@ The collector parses `.gitlab-ci.yml` across all active branches (including `inc
 | Code coverage reporting | Measurement practices |
 | Deployment with environment gates | Automated deployment controls |
 
-### Member Activity
+#### Member Activity
 
 For each team member, the collector:
 
@@ -173,6 +234,39 @@ For each team member, the collector:
    - `Co-Authored-By: Cursor`
 
 This catches AI usage in repos not explicitly listed in your config.
+
+---
+
+### GitHub Signal Sources
+
+#### Repo Artifacts
+
+The collector checks each listed GitHub repo for AI tool artifacts using **tiered scoring** — the score reflects depth of adoption (e.g., a well-populated `prompts/` directory scores higher than one with a single file):
+
+| Artifact | What It Indicates |
+|---|---|
+| `CLAUDE.md` | Claude Code context file (scored by line count) |
+| `.claude/settings.json` | Claude Code permission settings |
+| `.mcp.json` or `mcp.json` | MCP server configuration (scored by number of servers) |
+| `prompts/`, `.prompts/`, `.claude/commands/` | Shared prompt templates (scored by file count) |
+| `.cursorrules` | Cursor AI configuration |
+| `.github/copilot-instructions.md` | GitHub Copilot configuration |
+| `.github/workflows/` | Scanned for security scanners, AI test generation, and AI tool patterns |
+| `docs/adr/`, `docs/`, `CONTRIBUTING.md` | Scanned for AI-related documentation |
+
+Scores are aggregated with MAX across repos — if any repo has a given artifact, the team gets credit.
+
+#### PR Review Signals
+
+For each team member, the collector scans GitHub PRs authored during the survey period and computes team-level metrics:
+
+| Metric | What It Measures |
+|---|---|
+| LGTM rate | % of PRs approved with zero inline review comments |
+| Review comment depth | Avg ratio of files with inline comments to total changed files |
+| AI co-author rate | % of PRs with any AI co-author tag (Claude, Copilot, Cursor) |
+| AI agent co-author rate | % of PRs with Claude Code CLI co-author tag |
+| Self-review rate | % of PRs where author commented before first approval |
 
 ## Output Format
 
@@ -200,12 +294,24 @@ The output JSON follows the ai-fluency import schema:
     {
       "source_id": "gitlab-member-activity",
       "signals": [...]
+    },
+    {
+      "source_id": "gitlab-review-signals",
+      "signals": [...]
+    },
+    {
+      "source_id": "github-repo-artifacts",
+      "signals": [...]
+    },
+    {
+      "source_id": "github-review-signals",
+      "signals": [...]
     }
   ]
 }
 ```
 
-Sources with no signals are omitted from the output.
+Sources with no signals are omitted from the output. A single output file may include both GitLab and GitHub sources if both are configured.
 
 ## Scoring
 
@@ -282,9 +388,13 @@ The collector validates all preconditions before making any API calls and provid
 | Invalid period | `Invalid period format: {value}. Expected YYYY-WNN (e.g. 2026-W12)` |
 | Project inaccessible | `Access denied to project '{path}'. Check that the token has access to this project.` |
 | Member not found | `GitLab user '{username}' not found. Check the username in your config.` |
+| GitHub token not set | `GITHUB_TOKEN environment variable is not set.` |
+| GitHub token invalid | `GitHub authentication failed. Check that GITHUB_TOKEN is valid.` |
+| No github_repos configured | `No github_repos configured. Add repos under team.github_repos in your config.` |
 
 ## Limitations
 
-- Supports GitLab.com and self-hosted GitLab instances (set `gitlab_url` in config)
+- GitLab: supports GitLab.com and self-hosted instances (set `gitlab_url` in config)
+- GitHub: supports GitHub.com only (no GitHub Enterprise)
 - One team per config file — run multiple times for multiple teams
 - Produces a JSON file for manual import — no automatic upload

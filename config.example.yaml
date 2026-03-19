@@ -35,3 +35,12 @@ team:
     - "my-group/project-two"
     - "my-group/subgroup/project-three"
     - "my-org/platform/backend/api"
+
+  # List of GitHub repos to scan (owner/repo format)
+  # Used by `afc github-scan` — requires GITHUB_TOKEN env var
+  # Scanned for AI tool artifacts (tiered scoring) and PR review signals
+  #
+  # Uncomment and fill in to enable GitHub scanning:
+  # github_repos:
+  #   - "my-org/backend-api"
+  #   - "my-org/frontend-app"

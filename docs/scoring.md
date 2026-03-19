@@ -127,9 +127,44 @@ Total weight for `im-autocomplete` = 0.3 + 0.3 + 0.3 = 0.9
 
 **Evidence**: "Co-authored commits with Claude by 2/3 members (17 commits)"
 
+## GitHub Artifact Scoring
+
+GitHub artifact scoring uses a **tiered approach** rather than binary presence. Scores are determined by depth of adoption (line count, file count, server count) and aggregated with **MAX across repos** — the highest-scoring repo's value is used for the team.
+
+| Skill | What It Checks | Score Logic |
+|---|---|---|
+| `cq-context` | `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md` | Line count: <10 → 40, 10–50 → 70, >50 → 100 |
+| `tg-permission-gated` | `.claude/settings.json` | File present with permission keys → 80; bare file → 40 |
+| `ks-patterns` | `prompts/`, `.prompts/`, `.claude/commands/` | File count: 0 → 0, <3 → 50, 3–10 → 75, >10 → 100 |
+| `pm-advanced` | `.mcp.json`, `mcp.json` (parsed for `mcpServers`) | Unparseable → 70, 1 server → 70, >1 server → 100 |
+| `ks-documentation` | `docs/adr/` (AI ADRs), `docs/` (AI docs), `CONTRIBUTING.md` | AI ADRs → 80, AI docs → 70, CONTRIBUTING → 60 |
+| `tg-security-gates` | `.github/workflows/` (CodeQL, Snyk, Semgrep, etc.) | 2+ scanners → 80, 1 scanner → 60, none → 0 |
+| `sdlc-testing` | `.github/workflows/` (Diffblue, CodiumAI, Claude test patterns) | Any AI test pattern → 70, none → 0 |
+| `ks-workflows` | `.github/workflows/` (Claude, Copilot, Cursor, Duo, CodeRabbit) | Any AI tool pattern → 80, none → 0 |
+
+The scoring logic lives in `src/ai_fluency_collector/scanners/github_artifact_scanner.py`.
+
+## GitHub PR Review Behavioral Mappings
+
+Computed from GitHub PR data for the survey period. Scores are team-level with no individual attribution.
+
+| Metric Key | What It Measures | Skill ID | Score Formula |
+|---|---|---|---|
+| `lgtm_without_comment` | % of authored PRs approved with zero inline review comments | `tg-code-review` | `100 - (rate × 100)` (lower LGTM rate = more review activity = higher score) |
+| `review_comment_depth` | Avg ratio of files with inline comments to total changed files | `cq-evaluation` | `ratio × 100` |
+| `ai_coauthor_rate` | % of authored PRs with any AI co-author tag | `im-chat` | `rate × 100` |
+| `ai_agent_coauthor_rate` | % of authored PRs with Claude Code CLI co-author tag | `im-supervised-agent` | `rate × 100` |
+| `self_review_rate` | % of PRs where author commented before first approval | `cq-refinement` | `rate × 100` |
+
+AI co-author patterns detected: `co-authored-by:.*claude`, `co-authored-by:.*copilot`, `co-authored-by:.*cursor`, `co-authored-by:.*claude.*code|generated with.*claude.*code`.
+
+Mappings live in `src/ai_fluency_collector/github_scoring.py` as `GITHUB_REVIEW_SKILL_MAPPINGS`.
+
 ## Modifying Weights and Mappings
 
-All mappings live in `src/ai_fluency_collector/scoring.py` as three data structures:
+All GitLab mappings live in `src/ai_fluency_collector/scoring.py`. GitHub review mappings live in `src/ai_fluency_collector/github_scoring.py`. GitHub artifact scoring logic is in `src/ai_fluency_collector/scanners/github_artifact_scanner.py`.
+
+GitLab data structures:
 
 - `ARTIFACT_SKILL_MAPPINGS` — repo artifact → skill mappings
 - `CI_SKILL_MAPPINGS` — CI pattern → skill mappings
