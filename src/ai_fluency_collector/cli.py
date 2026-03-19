@@ -11,6 +11,7 @@ from ai_fluency_collector.gitlab_client import (
     GitLabAccessError,
     GitLabAuthError,
     GitLabClient,
+    GitLabServerError,
     GitLabUserNotFoundError,
 )
 from ai_fluency_collector.output import build_output, write_output
@@ -109,7 +110,7 @@ def main(
     client = GitLabClient(token, base_url=effective_gitlab_url)
     try:
         client.validate_token()
-    except GitLabAuthError as e:
+    except (GitLabAuthError, GitLabServerError) as e:
         raise click.ClickException(str(e)) from e
 
     # 6. --validate mode: test connection, list projects, and exit
@@ -124,7 +125,7 @@ def main(
             try:
                 client.get_branches(project)
                 click.echo(f"  {project}: accessible")
-            except (GitLabAccessError, GitLabAuthError) as e:
+            except (GitLabAccessError, GitLabAuthError, GitLabServerError) as e:
                 click.echo(f"  {project}: ERROR - {e}")
         click.echo()
         click.echo("Validation complete.")
@@ -161,7 +162,7 @@ def main(
 
         try:
             result = scanner.scan_project(project)
-        except (GitLabAccessError, GitLabAuthError) as e:
+        except (GitLabAccessError, GitLabAuthError, GitLabServerError) as e:
             raise click.ClickException(str(e)) from e
 
         if verbose:
@@ -195,7 +196,7 @@ def main(
     for project in team.projects:
         try:
             result = ci_scanner.scan_project(project)
-        except (GitLabAccessError, GitLabAuthError) as e:
+        except (GitLabAccessError, GitLabAuthError, GitLabServerError) as e:
             raise click.ClickException(str(e)) from e
 
         all_ci_results.append(result)
@@ -215,7 +216,7 @@ def main(
     member_scanner = MemberScanner(client, team.projects)
     try:
         member_results = member_scanner.scan_all_members(team.members)
-    except GitLabUserNotFoundError as e:
+    except (GitLabUserNotFoundError, GitLabServerError) as e:
         raise click.ClickException(str(e)) from e
 
     for result in member_results:

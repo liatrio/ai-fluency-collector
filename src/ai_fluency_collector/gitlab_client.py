@@ -17,6 +17,20 @@ class GitLabUserNotFoundError(Exception):
     pass
 
 
+class GitLabServerError(Exception):
+    pass
+
+
+def _check_server_error(resp: requests.Response, context: str = "") -> None:
+    """Raise GitLabServerError on 5xx responses."""
+    if 500 <= resp.status_code < 600:
+        msg = f"GitLab server error ({resp.status_code})"
+        if context:
+            msg += f" while {context}"
+        msg += ". The GitLab instance may be down or experiencing issues. Try again later."
+        raise GitLabServerError(msg)
+
+
 class GitLabClient:
     """Client for GitLab REST API v4."""
 
@@ -42,6 +56,7 @@ class GitLabClient:
             raise GitLabAuthError(
                 f"Could not connect to {self.base_url}. Check the gitlab_url in your config."
             ) from e
+        _check_server_error(resp, "validating token")
         if resp.status_code == 401:
             raise GitLabAuthError(
                 f"GitLab authentication failed at {self.base_url}. "
@@ -58,6 +73,7 @@ class GitLabClient:
         encoded_file = quote(file_path, safe="")
         url = self._api_url(f"/projects/{encoded_project}/repository/files/{encoded_file}")
         resp = self.session.head(url, params={"ref": ref})
+        _check_server_error(resp, f"checking file '{file_path}' in '{project_path}'")
         if resp.status_code == 200:
             return True
         if resp.status_code == 404:
@@ -80,6 +96,7 @@ class GitLabClient:
         encoded_project = self._encode_project(project_path)
         url = self._api_url(f"/projects/{encoded_project}/repository/tree")
         resp = self.session.get(url, params={"path": dir_path, "ref": ref, "per_page": 1})
+        _check_server_error(resp, f"checking directory '{dir_path}' in '{project_path}'")
         if resp.status_code == 200:
             items = resp.json()
             return len(items) > 0
@@ -107,6 +124,7 @@ class GitLabClient:
         encoded_file = quote(file_path, safe="")
         url = self._api_url(f"/projects/{encoded_project}/repository/files/{encoded_file}/raw")
         resp = self.session.get(url, params={"ref": ref})
+        _check_server_error(resp, f"fetching '{file_path}' from '{project_path}'")
         if resp.status_code == 200:
             return resp.text
         if resp.status_code == 404:
@@ -137,6 +155,7 @@ class GitLabClient:
         page = 1
         while True:
             resp = self.session.get(url, params={"per_page": 100, "page": page})
+            _check_server_error(resp, f"listing branches for '{project_path}'")
             if resp.status_code == 404:
                 raise GitLabAccessError(
                     f"Project '{project_path}' not found. "
@@ -168,6 +187,7 @@ class GitLabClient:
         """
         url = self._api_url("/users")
         resp = self.session.get(url, params={"username": username})
+        _check_server_error(resp, f"looking up user '{username}'")
         resp.raise_for_status()
         users = resp.json()
         if not users:
@@ -183,6 +203,7 @@ class GitLabClient:
         page = 1
         while True:
             resp = self.session.get(url, params={"per_page": 100, "page": page, "owned": True})
+            _check_server_error(resp, "listing user projects")
             resp.raise_for_status()
             items = resp.json()
             if not items:
@@ -201,6 +222,7 @@ class GitLabClient:
                 url,
                 params={"action": action, "per_page": 100, "page": page},
             )
+            _check_server_error(resp, "listing user events")
             resp.raise_for_status()
             items = resp.json()
             if not items:
@@ -233,6 +255,7 @@ class GitLabClient:
         while True:
             params["page"] = page
             resp = self.session.get(url, params=params)
+            _check_server_error(resp, "listing project commits")
             if resp.status_code == 404:
                 return []
             resp.raise_for_status()
