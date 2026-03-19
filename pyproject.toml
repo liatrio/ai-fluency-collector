@@ -22,6 +22,7 @@ dev = [
 
 [project.scripts]
 ai-fluency-collector = "ai_fluency_collector.cli:main"
+afc = "ai_fluency_collector.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
