@@ -274,6 +274,24 @@ class GitLabClient:
             page += 1
         return results
 
+    def get_mr_commits(self, project_id: int, mr_iid: int) -> list[dict]:
+        """Get all commits for a merge request."""
+        url = self._api_url(f"/projects/{project_id}/merge_requests/{mr_iid}/commits")
+        results: list[dict] = []
+        page = 1
+        while True:
+            resp = self.session.get(url, params={"per_page": 100, "page": page})
+            _check_server_error(resp, f"fetching commits for MR !{mr_iid}")
+            if resp.status_code == 404:
+                return []
+            resp.raise_for_status()
+            items = resp.json()
+            if not items:
+                break
+            results.extend(items)
+            page += 1
+        return results
+
     def get_mr_notes(self, project_id: int, mr_iid: int) -> list[dict]:
         """Get all notes for a merge request. Caller filters system notes."""
         url = self._api_url(f"/projects/{project_id}/merge_requests/{mr_iid}/notes")

@@ -29,6 +29,21 @@ def _register_reviewed_mrs(username: str, mrs: list[dict]) -> None:
         responses.add(responses.GET, MR_SEARCH, json=[], status=200)
 
 
+def _register_commits(project_id: int, mr_iid: int, commits: list[dict] | None = None) -> None:
+    responses.add(
+        responses.GET,
+        f"{BASE}/projects/{project_id}/merge_requests/{mr_iid}/commits",
+        json=commits or [],
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        f"{BASE}/projects/{project_id}/merge_requests/{mr_iid}/commits",
+        json=[],
+        status=200,
+    )
+
+
 def _register_notes(project_id: int, mr_iid: int, notes: list[dict]) -> None:
     responses.add(
         responses.GET,
@@ -103,6 +118,7 @@ def test_period_to_date_range_week_53():
 def test_mr_with_no_comments_counts_as_lgtm():
     """MR with zero non-system notes increments LGTM count."""
     _register_authored_mrs("alice", [_mr(1)])
+    _register_commits(1, 1)
     _register_notes(1, 1, [])  # no notes
     _register_reviewed_mrs("alice", [])
 
@@ -118,6 +134,7 @@ def test_mr_with_no_comments_counts_as_lgtm():
 def test_mr_with_review_comment_does_not_count_as_lgtm():
     """MR with at least one non-system note is not an LGTM-without-comment."""
     _register_authored_mrs("alice", [_mr(1)])
+    _register_commits(1, 1)
     _register_notes(
         1,
         1,
@@ -143,6 +160,7 @@ def test_mr_with_review_comment_does_not_count_as_lgtm():
 def test_system_notes_are_filtered_for_lgtm():
     """System notes (bot activity) are excluded from LGTM analysis."""
     _register_authored_mrs("alice", [_mr(1)])
+    _register_commits(1, 1)
     _register_notes(
         1,
         1,
@@ -176,8 +194,10 @@ def test_lgtm_rate_mixed_mrs():
     """LGTM rate computed correctly across multiple MRs."""
     _register_authored_mrs("alice", [_mr(1), _mr(2), _mr(3)])
     # MR 1: no comments → LGTM
+    _register_commits(1, 1)
     _register_notes(1, 1, [])
     # MR 2: has comment → not LGTM
+    _register_commits(1, 2)
     _register_notes(
         1,
         2,
@@ -191,6 +211,7 @@ def test_lgtm_rate_mixed_mrs():
         ],
     )
     # MR 3: only system note → LGTM
+    _register_commits(1, 3)
     _register_notes(
         1,
         3,
@@ -339,6 +360,7 @@ def test_review_depth_no_changed_files_skipped():
 def test_self_review_before_approval():
     """Author note before first approval is detected as self-review."""
     _register_authored_mrs("alice", [_mr(1)])
+    _register_commits(1, 1)
     _register_notes(
         1,
         1,
@@ -370,6 +392,7 @@ def test_self_review_before_approval():
 def test_self_review_after_approval_does_not_count():
     """Author note after first approval is not counted as self-review."""
     _register_authored_mrs("alice", [_mr(1)])
+    _register_commits(1, 1)
     _register_notes(
         1,
         1,
@@ -401,6 +424,7 @@ def test_self_review_after_approval_does_not_count():
 def test_no_approval_does_not_count_self_review():
     """MR without any approval system note is not eligible for self-review credit."""
     _register_authored_mrs("alice", [_mr(1)])
+    _register_commits(1, 1)
     _register_notes(
         1,
         1,
@@ -446,10 +470,12 @@ def test_multiple_members_aggregated():
     """Metrics are aggregated team-wide across multiple members."""
     # alice: authored 1 MR with no comments (LGTM)
     _register_authored_mrs("alice", [_mr(1, project_id=1, author="alice")])
+    _register_commits(1, 1)
     _register_notes(1, 1, [])
     _register_reviewed_mrs("alice", [])
     # bob: authored 1 MR with a comment (not LGTM)
     _register_authored_mrs("bob", [_mr(2, project_id=1, author="bob")])
+    _register_commits(1, 2)
     _register_notes(
         1,
         2,

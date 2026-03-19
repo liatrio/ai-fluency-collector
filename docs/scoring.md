@@ -61,6 +61,28 @@ Mappings live in `src/ai_fluency_collector/scoring.py` as `CI_PIPELINE_SKILL_MAP
 
 Member activity scores are based on the percentage of team members who have AI co-authored commits.
 
+## MR Co-Author Tag Mappings
+
+Computed from commit messages in team-authored merged MRs for the survey period. Scores are team-level with no individual attribution. Signals are emitted under `gitlab-member-activity`.
+
+| Metric Key | What It Measures | Skill ID | Score Formula |
+|---|---|---|---|
+| `mr_ai_coauthor_rate` | % of team-authored merged MRs containing any AI `Co-Authored-By` tag | `im-chat` | `rate × 100` |
+| `mr_agentic_coauthor_rate` | % of team-authored merged MRs containing an agentic AI tag (Claude, Cursor) | `im-supervised-agent` | `rate × 100` |
+
+**Co-author patterns detected** (case-insensitive):
+
+| Pattern | Tool | Agentic |
+|---|---|---|
+| `Co-Authored-By:.*claude` | Claude / Claude Code | Yes |
+| `Co-Authored-By:.*copilot` | GitHub Copilot | No |
+| `Co-Authored-By:.*cursor` | Cursor | Yes |
+| `Co-Authored-By:.*duo` | GitLab Duo | No |
+
+**Evidence format**: "34% of team-authored merged MRs have AI co-author tags (Claude: 22%, Copilot: 12%)"
+
+Mappings live in `src/ai_fluency_collector/scoring.py` as `MR_COAUTHOR_SKILL_MAPPINGS`.
+
 ## MR Review Behavioral Mappings
 
 Computed from aggregated merge request data for the survey period. Scores are derived from team-level metrics with no individual attribution.

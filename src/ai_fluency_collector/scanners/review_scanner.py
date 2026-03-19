@@ -1,9 +1,39 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 
 from ai_fluency_collector.gitlab_client import GitLabClient
+
+# AI co-author patterns detected in MR commit messages.
+# agentic=True → also counted toward im-supervised-agent (agentic tools only).
+MR_AI_COAUTHOR_PATTERNS: list[dict] = [
+    {
+        "id": "claude",
+        "name": "Claude",
+        "pattern": re.compile(r"co-authored-by:.*claude", re.IGNORECASE),
+        "agentic": True,
+    },
+    {
+        "id": "copilot",
+        "name": "GitHub Copilot",
+        "pattern": re.compile(r"co-authored-by:.*copilot", re.IGNORECASE),
+        "agentic": False,
+    },
+    {
+        "id": "cursor",
+        "name": "Cursor",
+        "pattern": re.compile(r"co-authored-by:.*cursor", re.IGNORECASE),
+        "agentic": True,
+    },
+    {
+        "id": "duo",
+        "name": "GitLab Duo",
+        "pattern": re.compile(r"co-authored-by:.*duo", re.IGNORECASE),
+        "agentic": False,
+    },
+]
 
 
 def _period_to_date_range(period: str) -> tuple[str, str]:
@@ -26,6 +56,8 @@ class ReviewMetrics:
     review_comment_depth: float | None
     self_review_rate: float | None
     total_authored_mrs: int
+    mr_ai_coauthor_rate: float | None = None
+    mr_agentic_coauthor_rate: float | None = None
     evidence: dict[str, str] = field(default_factory=dict)
 
 
@@ -55,10 +87,13 @@ class ReviewScanner:
         start_date, end_date = _period_to_date_range(period)
         usernames_set = set(usernames)
 
-        # Authored MR aggregates (LGTM rate + self-review rate)
+        # Authored MR aggregates (LGTM rate + self-review rate + co-author tags)
         total_authored = 0
         lgtm_count = 0
         self_reviewed_count = 0
+        mrs_with_any_ai_tag = 0
+        mrs_with_agentic_tag = 0
+        tool_mr_counts: dict[str, int] = {p["id"]: 0 for p in MR_AI_COAUTHOR_PATTERNS}
 
         # Reviewer aggregates (comment depth)
         total_files_changed = 0
@@ -77,6 +112,23 @@ class ReviewScanner:
                 total_authored += 1
                 project_id = mr["project_id"]
                 mr_iid = mr["iid"]
+
+                # AI co-author tag detection in MR commits
+                commits = self.client.get_mr_commits(project_id, mr_iid)
+                mr_has_any_ai = False
+                mr_has_agentic = False
+                for commit in commits:
+                    message = commit.get("message", "") or commit.get("title", "")
+                    for pat in MR_AI_COAUTHOR_PATTERNS:
+                        if pat["pattern"].search(message):
+                            tool_mr_counts[pat["id"]] += 1
+                            mr_has_any_ai = True
+                            if pat["agentic"]:
+                                mr_has_agentic = True
+                if mr_has_any_ai:
+                    mrs_with_any_ai_tag += 1
+                if mr_has_agentic:
+                    mrs_with_agentic_tag += 1
 
                 notes = self.client.get_mr_notes(project_id, mr_iid)
                 non_system_notes = [n for n in notes if not n.get("system", False)]
@@ -148,6 +200,10 @@ class ReviewScanner:
         review_depth = (
             files_with_discussion / total_files_changed if total_files_changed > 0 else None
         )
+        mr_ai_coauthor_rate = mrs_with_any_ai_tag / total_authored if total_authored > 0 else None
+        mr_agentic_coauthor_rate = (
+            mrs_with_agentic_tag / total_authored if total_authored > 0 else None
+        )
 
         # ── Build team-level evidence strings (no individual attribution) ────
         evidence: dict[str, str] = {}
@@ -165,11 +221,25 @@ class ReviewScanner:
             evidence["self_review_rate"] = (
                 f"{pct}% of team-authored MRs included author self-review before approval"
             )
+        if mr_ai_coauthor_rate is not None:
+            overall_pct = round(mr_ai_coauthor_rate * 100)
+            tool_parts = [
+                f"{p['name']}: {round(tool_mr_counts[p['id']] / total_authored * 100)}%"
+                for p in MR_AI_COAUTHOR_PATTERNS
+                if tool_mr_counts[p["id"]] > 0
+            ]
+            breakdown = f" ({', '.join(tool_parts)})" if tool_parts else ""
+            evidence["mr_ai_coauthor_rate"] = (
+                f"{overall_pct}% of team-authored merged MRs have AI co-author tags{breakdown}"
+            )
+            evidence["mr_agentic_coauthor_rate"] = evidence["mr_ai_coauthor_rate"]
 
         return ReviewMetrics(
             lgtm_rate=lgtm_rate,
             review_comment_depth=review_depth,
             self_review_rate=self_review_rate,
             total_authored_mrs=total_authored,
+            mr_ai_coauthor_rate=mr_ai_coauthor_rate,
+            mr_agentic_coauthor_rate=mr_agentic_coauthor_rate,
             evidence=evidence,
         )
