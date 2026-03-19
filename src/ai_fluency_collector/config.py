@@ -16,6 +16,7 @@ class TeamConfig:
     ci_signals: dict[str, list[str]] = field(default_factory=dict)
     scan_from: str | None = None
     scan_to: str | None = None
+    github_repos: list[str] = field(default_factory=list)
 
 
 def load_config(path: str) -> TeamConfig:
@@ -49,8 +50,6 @@ def load_config(path: str) -> TeamConfig:
         missing.append("team.name")
     if not team.get("code"):
         missing.append("team.code")
-    if "projects" not in team:
-        missing.append("team.projects")
 
     if missing:
         raise ValueError(f"Missing required field: {', '.join(missing)}")
@@ -59,9 +58,18 @@ def load_config(path: str) -> TeamConfig:
     if not isinstance(members, list):
         raise ValueError("team.members must be a list of GitLab usernames")
 
-    projects = team["projects"]
-    if not isinstance(projects, list) or len(projects) == 0:
-        raise ValueError("team.projects must be a non-empty list")
+    projects = team.get("projects") or []
+    if not isinstance(projects, list):
+        raise ValueError("team.projects must be a list")
+
+    github_repos = team.get("github_repos") or []
+    if not isinstance(github_repos, list):
+        raise ValueError("team.github_repos must be a list of owner/repo strings")
+    for entry in github_repos:
+        if not isinstance(entry, str) or "/" not in entry:
+            raise ValueError(
+                f"team.github_repos entries must be 'owner/repo' strings, got: {entry!r}"
+            )
 
     gitlab_url = team.get("gitlab_url", "https://gitlab.com")
     if not isinstance(gitlab_url, str) or not gitlab_url:
@@ -102,4 +110,5 @@ def load_config(path: str) -> TeamConfig:
         ci_signals=ci_signals,
         scan_from=scan_from,
         scan_to=scan_to,
+        github_repos=github_repos,
     )
