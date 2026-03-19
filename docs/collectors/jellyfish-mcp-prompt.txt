@@ -1,0 +1,151 @@
+JELLYFISH DORA SIGNAL COLLECTOR — MONTHLY PROMPT
+=================================================
+
+Run this prompt once at the start of each calendar month in a Claude Code
+session where the Jellyfish MCP server is active.
+
+Jellyfish returns monthly aggregates regardless of the date window passed.
+Running this weekly within the same month produces identical scores — monthly
+cadence is correct.
+
+Fill in the four placeholders marked with [BRACKETS] before running.
+
+SKILLS TARGETED
+  sdlc-deployment    L4 — deployment frequency
+  pm-measurement     L4 — lead time for changes
+  tg-security-gates  L3 — change failure rate (N>=5 only)
+  tg-code-review     L2 — change failure rate (N>=5 only)
+  sdlc-monitoring    L4 — MTTR (skipped if no incidents)
+
+SOURCE ID: jellyfish-dora
+
+---PROMPT START---
+
+You have access to a Jellyfish MCP server. I need you to collect DORA metrics
+for a specific team and produce a QuantitativeSignalImport JSON file.
+
+## Cadence Note
+Jellyfish returns monthly aggregates regardless of the date window requested.
+Run this prompt ONCE at the start of each calendar month, not weekly.
+Tag the output to the survey period that is active when you run it.
+
+## Step 1 — Discover available Jellyfish tools
+List all available Jellyfish MCP tools so we know what queries are possible.
+Identify which tools provide: deployment frequency, lead time for changes,
+change failure rate, MTTR, and PR/ticket throughput.
+
+## Step 2 — Query the metrics
+Team / project identifier in Jellyfish: [YOUR JELLYFISH TEAM OR PROJECT NAME]
+Date range: [START DATE e.g. 2026-03-01] to [END DATE e.g. 2026-03-31]
+
+Use the current calendar month as the date range. Jellyfish aggregates most
+DORA metrics at the monthly level so a monthly window gives the cleanest data.
+
+Fetch the following metrics for this team over this date range:
+1. Deployment frequency (total deployments in the period)
+2. Lead time for changes (median, in hours)
+3. Change failure rate (% of deployments that caused an incident or rollback)
+4. MTTR — mean time to recover (median, in hours or minutes)
+5. PR throughput (PRs merged per engineer per week, if available)
+
+If a metric is unavailable or returns no data, skip it — do not fabricate a score.
+
+## Step 3 — Convert to scores using these exact rules
+
+### Deployment Frequency -> skill: sdlc-deployment
+Use the monthly total returned by Jellyfish:
+
+Monthly deployments | Score
+--------------------|------
+60+                 | 100
+20-59               | 85
+8-19                | 70
+4-7                 | 55
+1-3                 | 30
+0                   | 10
+
+Evidence format: "Deployment frequency: X/month (DORA tier: [Elite/High/Medium/Low])"
+
+### Lead Time for Changes -> skill: pm-measurement
+Lead time    | Score
+-------------|------
+< 1 hour     | 100
+1-24 hours   | 85
+1-7 days     | 65
+1w - 1 month | 40
+> 1 month    | 10
+
+Evidence format: "Median lead time: Xh (DORA tier: [Elite/High/Medium/Low])"
+
+### Change Failure Rate -> skills: tg-security-gates AND tg-code-review
+Score = round(max(0, 100 - (cfr_percent * 5)))
+Examples: 0% CFR -> 100, 5% -> 75, 10% -> 50, 20% -> 0
+
+IMPORTANT: Only include this signal if N >= 5 deployments. With fewer
+deployments the sample is too small to be meaningful — skip both skills if
+N < 5.
+
+Evidence format: "Change failure rate: X% (N=Y deployments)"
+Apply this same score to BOTH tg-security-gates and tg-code-review.
+
+### MTTR -> skill: sdlc-monitoring
+Skip entirely if null (no incidents in the period) — do not fabricate a score.
+
+MTTR        | Score
+------------|------
+< 1 hour    | 100
+1-4 hours   | 80
+4-24 hours  | 60
+1-7 days    | 35
+> 1 week    | 10
+
+Evidence format: "Median MTTR: Xh (DORA tier: [Elite/High/Medium/Low])"
+
+### PR Throughput -> skill: pm-measurement (only if lead time not available)
+Score = round(min(100, throughput_per_engineer_per_week * 25))
+Evidence format: "PR throughput: X PRs/engineer/week"
+Note: Only include this if lead time data is unavailable, to avoid
+double-counting pm-measurement.
+
+## Step 4 — Write the output file
+
+Write the result to: ~/Downloads/jellyfish-[TEAM_CODE]-[SURVEY_PERIOD].json
+
+Use this exact structure:
+{
+  "team_code": "[TEAM_CODE]",
+  "survey_period": "[SURVEY_PERIOD]",
+  "sources": [
+    {
+      "source_id": "jellyfish-dora",
+      "signals": [
+        {
+          "skill_id": "[skill_id]",
+          "score": [0-100],
+          "evidence": "[evidence string]"
+        }
+      ]
+    }
+  ]
+}
+
+Only include signals where you have real data. Do not include a signal entry
+if the metric was unavailable or skipped. Scores must be integers 0-100.
+Evidence strings must be plain text with no markdown.
+
+Valid skill IDs for this collector:
+- sdlc-deployment
+- sdlc-monitoring
+- pm-measurement
+- tg-security-gates
+- tg-code-review
+
+## Step 5 — Confirm
+Print the full JSON to the console and confirm the file path it was written to.
+
+---PROMPT END---
+
+WEEKLY VS MONTHLY CADENCE SUMMARY
+  Formbricks survey   weekly   (weekly data)
+  GitLab signals      weekly   (weekly MR/CI activity)
+  Jellyfish DORA      monthly  (monthly aggregate — run first Friday of month)
