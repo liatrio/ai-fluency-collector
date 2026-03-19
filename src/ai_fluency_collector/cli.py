@@ -117,6 +117,10 @@ def scan(
 
     # 2. Resolve gitlab_url: CLI flag overrides config value
     effective_gitlab_url = gitlab_url if gitlab_url is not None else team.gitlab_url
+    # Auto-add https:// if missing
+    if not effective_gitlab_url.startswith(("http://", "https://")):
+        effective_gitlab_url = f"https://{effective_gitlab_url}"
+    effective_gitlab_url = effective_gitlab_url.rstrip("/")
 
     # 3. Validate period
     if period is None:
@@ -285,7 +289,15 @@ def init() -> None:
 
     # Step 1: Basics
     click.echo("Step 1: Basics")
-    gitlab_url = click.prompt("GitLab URL", default="https://gitlab.com")
+    while True:
+        gitlab_url = click.prompt("GitLab URL", default="https://gitlab.com")
+        # Auto-add https:// if missing
+        if not gitlab_url.startswith("http://") and not gitlab_url.startswith("https://"):
+            gitlab_url = f"https://{gitlab_url}"
+            click.echo(f"  Using: {gitlab_url}")
+        # Strip trailing slashes
+        gitlab_url = gitlab_url.rstrip("/")
+        break
     team_name = click.prompt("Team name")
     suggested_code = _slugify(team_name)
     team_code = click.prompt("Team code", default=suggested_code)

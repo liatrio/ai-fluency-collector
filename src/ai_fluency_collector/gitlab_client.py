@@ -35,6 +35,8 @@ class GitLabClient:
     """Client for GitLab REST API v4."""
 
     def __init__(self, token: str, base_url: str = "https://gitlab.com") -> None:
+        if not base_url.startswith(("http://", "https://")):
+            base_url = f"https://{base_url}"
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
         self.session.headers["PRIVATE-TOKEN"] = token
@@ -52,7 +54,7 @@ class GitLabClient:
         """
         try:
             resp = self.session.get(self._api_url("/user"))
-        except (requests.ConnectionError, requests.Timeout) as e:
+        except (requests.ConnectionError, requests.Timeout, requests.exceptions.MissingSchema) as e:
             raise GitLabAuthError(
                 f"Could not connect to {self.base_url}. Check the gitlab_url in your config."
             ) from e
