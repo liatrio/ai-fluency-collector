@@ -67,7 +67,19 @@ def validate_period(period: str) -> str:
     default=False,
     help="Test the connection, list accessible projects, and exit without scanning.",
 )
-def main(config_path: str, period: str | None, gitlab_url: str | None, validate: bool) -> None:
+@click.option(
+    "--verbose",
+    is_flag=True,
+    default=False,
+    help="Show detailed debug output during scanning.",
+)
+def main(
+    config_path: str,
+    period: str | None,
+    gitlab_url: str | None,
+    validate: bool,
+    verbose: bool,
+) -> None:
     """Scan GitLab repositories for AI adoption signals."""
     # 1. Load and validate config
     try:
@@ -129,16 +141,33 @@ def main(config_path: str, period: str | None, gitlab_url: str | None, validate:
     click.echo(f"  Output:   {output_file}")
     click.echo()
 
-    # 6. Scan for repo artifacts
+    # 8. Scan for repo artifacts
     click.echo("Scanning for repo artifacts...")
     scanner = ArtifactScanner(client)
     all_artifact_results: list[dict[str, bool]] = []
 
     for project in team.projects:
+        if verbose:
+            from ai_fluency_collector.scanners.artifact_scanner import (
+                _get_active_branches,
+            )
+
+            branches = _get_active_branches(client, project)
+            click.echo(f"    [{project}] {len(branches)} active branches found")
+            for b in branches:
+                click.echo(f"      {b['name']} (weight={b['weight']})")
+            if not branches:
+                click.echo("      (falling back to HEAD)")
+
         try:
             result = scanner.scan_project(project)
         except (GitLabAccessError, GitLabAuthError) as e:
             raise click.ClickException(str(e)) from e
+
+        if verbose:
+            for aid, weight in result.items():
+                if weight > 0:
+                    click.echo(f"      found {aid} (weight={weight})")
 
         all_artifact_results.append(result)
         found = [aid for aid, present in result.items() if present]
