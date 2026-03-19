@@ -413,3 +413,64 @@ def test_local_include_missing_file_skipped():
     result = scanner.scan_project(PROJECT)
     for pid in CI_PATTERN_IDS:
         assert result[pid] == 0.0
+
+
+@responses.activate
+def test_cross_project_include_ai_review():
+    """AI code review detected via cross-project include file path."""
+    _register_branches(SINGLE_DEFAULT_BRANCH)
+
+    root_ci = yaml.dump(
+        {
+            "include": [{"local": ".gitlab/build/.gitlab-ci.yml"}],
+        }
+    )
+    _register_ci_content(root_ci)
+
+    build_ci = yaml.dump(
+        {
+            "include": [
+                {
+                    "project": "platform/gitlab-templates",
+                    "ref": "main",
+                    "file": ["ai-review/.ai-code-review.yml"],
+                }
+            ],
+        }
+    )
+    encoded_file = quote(".gitlab/build/.gitlab-ci.yml", safe="")
+    responses.add(
+        responses.GET,
+        f"{BASE}/projects/{ENCODED_PROJECT}/repository/files/{encoded_file}/raw",
+        body=build_ci,
+        status=200,
+    )
+
+    client = GitLabClient("test-token")
+    scanner = CIScanner(client)
+    result = scanner.scan_project(PROJECT)
+    assert result["ai-code-review"] == DEFAULT_BRANCH_WEIGHT
+
+
+@responses.activate
+def test_cross_project_include_file_as_string():
+    """Cross-project include with file as string (not list) is detected."""
+    _register_branches(SINGLE_DEFAULT_BRANCH)
+
+    ci = yaml.dump(
+        {
+            "include": [
+                {
+                    "project": "platform/templates",
+                    "ref": "main",
+                    "file": "ai-review/review.yml",
+                }
+            ],
+        }
+    )
+    _register_ci_content(ci)
+
+    client = GitLabClient("test-token")
+    scanner = CIScanner(client)
+    result = scanner.scan_project(PROJECT)
+    assert result["ai-code-review"] == DEFAULT_BRANCH_WEIGHT

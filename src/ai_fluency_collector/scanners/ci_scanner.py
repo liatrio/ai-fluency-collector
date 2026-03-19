@@ -43,13 +43,14 @@ DEPLOY_STAGE_PATTERNS = re.compile(r"deploy", re.IGNORECASE)
 
 
 def _extract_includes(ci_config: dict) -> tuple[list[str], list[str]]:
-    """Extract template and local paths from GitLab CI include directives.
+    """Extract template, local, and project file paths from GitLab CI include directives.
 
-    Returns (templates, local_paths).
+    Returns (templates, local_paths). Templates includes both GitLab CI
+    templates and file paths from project: includes (cross-project references).
 
     Handles all include formats:
     - String shorthand: include: 'template.yml'
-    - Single dict: include: {template: 'path', local: 'path'}
+    - Single dict: include: {template: 'path', local: 'path', project: ..., file: ...}
     - List of strings or dicts
     """
     includes = ci_config.get("include")
@@ -59,22 +60,32 @@ def _extract_includes(ci_config: dict) -> tuple[list[str], list[str]]:
     templates: list[str] = []
     local_paths: list[str] = []
 
+    def _process_include_dict(item: dict) -> None:
+        if "template" in item:
+            templates.append(item["template"])
+        if "local" in item:
+            local_paths.append(item["local"])
+        # Cross-project includes: project: + file:
+        # The file paths are useful for pattern matching (e.g., ai-review/*.yml)
+        if "project" in item and "file" in item:
+            files = item["file"]
+            if isinstance(files, str):
+                templates.append(files)
+            elif isinstance(files, list):
+                for f in files:
+                    if isinstance(f, str):
+                        templates.append(f)
+
     if isinstance(includes, str):
         templates.append(includes)
     elif isinstance(includes, dict):
-        if "template" in includes:
-            templates.append(includes["template"])
-        if "local" in includes:
-            local_paths.append(includes["local"])
+        _process_include_dict(includes)
     elif isinstance(includes, list):
         for item in includes:
             if isinstance(item, str):
                 templates.append(item)
             elif isinstance(item, dict):
-                if "template" in item:
-                    templates.append(item["template"])
-                if "local" in item:
-                    local_paths.append(item["local"])
+                _process_include_dict(item)
 
     return templates, local_paths
 
@@ -85,6 +96,14 @@ def _has_template_match(templates: list[str], known_templates: list[str]) -> boo
         for known in known_templates:
             if known in tmpl:
                 return True
+    return False
+
+
+def _has_template_pattern(templates: list[str], pattern: re.Pattern) -> bool:
+    """Check if any template path matches a regex pattern."""
+    for tmpl in templates:
+        if pattern.search(tmpl):
+            return True
     return False
 
 
@@ -166,8 +185,14 @@ def _analyze_ci_config(ci_config: dict, templates: list[str]) -> dict[str, bool]
             _has_template_match(templates, SECRET_TEMPLATES)
             or _search_jobs(ci_config, SECRET_PATTERNS)
         ),
-        "ai-code-review": _search_jobs(ci_config, AI_REVIEW_PATTERNS),
-        "ai-test-generation": _search_jobs(ci_config, AI_TEST_PATTERNS),
+        "ai-code-review": (
+            _search_jobs(ci_config, AI_REVIEW_PATTERNS)
+            or _has_template_pattern(templates, AI_REVIEW_PATTERNS)
+        ),
+        "ai-test-generation": (
+            _search_jobs(ci_config, AI_TEST_PATTERNS)
+            or _has_template_pattern(templates, AI_TEST_PATTERNS)
+        ),
         "dependency-scanning": (
             _has_template_match(templates, DEPENDENCY_TEMPLATES)
             or _search_jobs(ci_config, DEPENDENCY_PATTERNS)
