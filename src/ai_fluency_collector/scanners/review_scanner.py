@@ -90,8 +90,7 @@ class ReviewScanner:
                 approval_system_notes = [
                     n
                     for n in notes
-                    if n.get("system", False)
-                    and "approved this merge request" in n.get("body", "")
+                    if n.get("system", False) and "approved this merge request" in n.get("body", "")
                 ]
                 if approval_system_notes:
                     first_approval_at = min(n["created_at"] for n in approval_system_notes)

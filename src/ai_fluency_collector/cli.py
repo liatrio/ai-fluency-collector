@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date
+from datetime import date, timedelta
 
 import click
 import yaml
@@ -47,6 +47,37 @@ def validate_period(period: str) -> str:
             f"Invalid period format: {period}. Expected YYYY-WNN (e.g. 2026-W12)"
         )
     return period
+
+
+def _parse_date(date_str: str) -> date:
+    """Parse a YYYY-MM-DD string, raising BadParameter on bad input."""
+    try:
+        return date.fromisoformat(date_str)
+    except ValueError:
+        raise click.BadParameter(
+            f"Invalid date format: {date_str}. Expected YYYY-MM-DD (e.g. 2026-01-01)"
+        ) from None
+
+
+def _dates_to_iso_weeks(from_str: str, to_str: str) -> list[str]:
+    """Return every ISO week (YYYY-WNN) that overlaps the given date range, inclusive.
+
+    Starts from the Monday of the week containing from_date and advances
+    seven days at a time until past to_date.
+    """
+    from_date = _parse_date(from_str)
+    to_date = _parse_date(to_str)
+    if from_date > to_date:
+        raise click.BadParameter("--from must be earlier than --to")
+    # Snap to Monday of the first week so we don't skip a partial week
+    from_iso = from_date.isocalendar()
+    current = date.fromisocalendar(from_iso[0], from_iso[1], 1)
+    weeks: list[str] = []
+    while current <= to_date:
+        iso = current.isocalendar()
+        weeks.append(f"{iso[0]}-W{iso[1]:02d}")
+        current += timedelta(days=7)
+    return weeks
 
 
 def _slugify(text: str) -> str:
@@ -97,6 +128,18 @@ def main():
     help="Test the connection, list accessible projects, and exit without scanning.",
 )
 @click.option(
+    "--from",
+    "from_date",
+    default=None,
+    help="Range start date YYYY-MM-DD. Use with --to to scan multiple weeks.",
+)
+@click.option(
+    "--to",
+    "to_date",
+    default=None,
+    help="Range end date YYYY-MM-DD. Use with --from to scan multiple weeks.",
+)
+@click.option(
     "--usernames",
     default=None,
     help="Comma-separated GitLab usernames (overrides config members; also TEAM_USERNAMES env).",
@@ -112,6 +155,8 @@ def scan(
     period: str | None,
     gitlab_url: str | None,
     validate: bool,
+    from_date: str | None,
+    to_date: str | None,
     usernames: str | None,
     verbose: bool,
 ) -> None:
@@ -147,11 +192,28 @@ def scan(
         effective_gitlab_url = f"https://{effective_gitlab_url}"
     effective_gitlab_url = effective_gitlab_url.rstrip("/")
 
-    # 5. Validate period
-    if period is None:
-        period = current_iso_week()
+    # 5. Resolve periods to scan
+    # Precedence: CLI --from/--to → config scan_from/scan_to → CLI --period → current week
+    if (from_date is None) != (to_date is None):
+        raise click.ClickException("--from and --to must be used together.")
+
+    effective_from = from_date or team.scan_from
+    effective_to = to_date or team.scan_to
+
+    if effective_from and period:
+        raise click.ClickException("--from/--to and --period are mutually exclusive.")
+
+    if effective_from:
+        try:
+            periods = _dates_to_iso_weeks(effective_from, effective_to)
+        except click.BadParameter as e:
+            raise click.ClickException(str(e)) from e
     else:
-        validate_period(period)
+        if period is None:
+            period = current_iso_week()
+        else:
+            validate_period(period)
+        periods = [period]
 
     # 6. Check GITLAB_TOKEN
     token = os.environ.get("GITLAB_TOKEN")
@@ -187,17 +249,24 @@ def scan(
         return
 
     # 9. Print startup banner
-    output_file = f"{team.code}-{period}.json"
+    multi_week = len(periods) > 1
+    if multi_week:
+        period_display = f"{periods[0]} → {periods[-1]} ({len(periods)} weeks)"
+        output_display = f"{team.code}-{periods[0]}.json … {team.code}-{periods[-1]}.json"
+    else:
+        period_display = periods[0]
+        output_display = f"{team.code}-{periods[0]}.json"
+
     click.echo(AFC_BANNER)
     click.echo(f"  GitLab:   {effective_gitlab_url}")
     click.echo(f"  Team:     {team.name}")
     click.echo(f"  Members:  {len(effective_members)}")
     click.echo(f"  Projects: {len(team.projects)}")
-    click.echo(f"  Period:   {period}")
-    click.echo(f"  Output:   {output_file}")
+    click.echo(f"  Period:   {period_display}")
+    click.echo(f"  Output:   {output_display}")
     click.echo()
 
-    # 10. Scan for repo artifacts
+    # 10. Scan for repo artifacts (period-agnostic — reflects current branch state)
     click.echo("Scanning for repo artifacts...")
     scanner = ArtifactScanner(client)
     all_artifact_results: list[dict[str, bool]] = []
@@ -243,7 +312,7 @@ def scan(
     click.echo(f"  → {len(artifact_signals)} artifact signals detected")
     click.echo()
 
-    # 12. Scan for CI config patterns
+    # 12. Scan for CI config patterns (period-agnostic — reflects current branch state)
     click.echo("Scanning CI configurations...")
     ci_scanner = CIScanner(client, ci_signals=team.ci_signals)
     all_ci_results: list[dict[str, bool]] = []
@@ -266,7 +335,7 @@ def scan(
     click.echo(f"  → {len(ci_signals)} CI signals detected")
     click.echo()
 
-    # 14. Scan member activity
+    # 14. Scan member activity (period-agnostic — 90-day rolling lookback)
     click.echo("Scanning member activity...")
     member_scanner = MemberScanner(client, team.projects)
     try:
@@ -291,31 +360,36 @@ def scan(
     click.echo(f"  → {len(member_signals)} member activity signals detected")
     click.echo()
 
-    # 16. Scan MR review behavioral patterns
-    click.echo("Scanning MR review patterns...")
+    # 16–17. Per-week: review signals → output file
     review_scanner = ReviewScanner(client)
-    review_metrics = review_scanner.scan(effective_members, period)
-    review_signals = calculate_review_scores(review_metrics, REVIEW_SKILL_MAPPINGS)
-    click.echo(f"  {review_metrics.total_authored_mrs} authored MRs analyzed")
-    click.echo(f"  → {len(review_signals)} review signals detected")
-    click.echo()
+    output_paths: list[str] = []
+    total_signals_all = len(artifact_signals) + len(ci_signals) + len(member_signals)
 
-    # 17. Build and write output JSON
-    data = build_output(
-        team.code, period, artifact_signals, ci_signals, member_signals, review_signals
-    )
-    output_path = write_output(data, team.code, period)
+    for idx, week in enumerate(periods, 1):
+        if multi_week:
+            click.echo(f"Scanning week {week} ({idx}/{len(periods)})...")
+        else:
+            click.echo("Scanning MR review patterns...")
 
-    # 18. Print summary
-    total_signals = (
-        len(artifact_signals) + len(ci_signals) + len(member_signals) + len(review_signals)
-    )
-    num_sources = len(data["sources"])
+        review_metrics = review_scanner.scan(effective_members, week)
+        review_signals = calculate_review_scores(review_metrics, REVIEW_SKILL_MAPPINGS)
+        click.echo(f"  {review_metrics.total_authored_mrs} authored MRs analyzed")
+        click.echo(f"  → {len(review_signals)} review signals detected")
+
+        data = build_output(
+            team.code, week, artifact_signals, ci_signals, member_signals, review_signals
+        )
+        output_path = write_output(data, team.code, week)
+        output_paths.append(output_path)
+        click.echo(f"  ✓ {output_path}")
+        click.echo()
+
+    # 18. Summary
     click.echo("Summary")
-    click.echo(f"  File:    {output_path}")
-    click.echo(f"  Sources: {num_sources}")
-    click.echo(f"  Signals: {total_signals}")
     click.echo(f"  Team:    {team.code}")
+    click.echo(f"  Weeks:   {len(periods)}")
+    click.echo(f"  Files:   {len(output_paths)}")
+    click.echo(f"  Signals: {total_signals_all} shared + review signals per week")
 
 
 @main.command()

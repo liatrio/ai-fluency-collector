@@ -115,6 +115,61 @@ def test_empty_members_list_is_allowed(tmp_path):
     assert result.members == []
 
 
+def test_scan_from_to_loaded_from_config(tmp_path):
+    config = {
+        "team": {
+            "name": "T",
+            "code": "t",
+            "members": ["u"],
+            "projects": ["a/b"],
+            "scan_from": "2026-01-01",
+            "scan_to": "2026-03-19",
+        }
+    }
+    path = tmp_path / "with-dates.yaml"
+    path.write_text(yaml.dump(config))
+    result = load_config(str(path))
+    assert result.scan_from == "2026-01-01"
+    assert result.scan_to == "2026-03-19"
+
+
+def test_scan_from_to_absent_by_default(valid_config):
+    result = load_config(valid_config)
+    assert result.scan_from is None
+    assert result.scan_to is None
+
+
+def test_scan_from_invalid_format(tmp_path):
+    config = {
+        "team": {
+            "name": "T",
+            "code": "t",
+            "projects": ["a/b"],
+            "scan_from": "01/01/2026",
+            "scan_to": "2026-03-19",
+        }
+    }
+    path = tmp_path / "bad-from.yaml"
+    path.write_text(yaml.dump(config))
+    with pytest.raises(ValueError, match="scan_from must be in YYYY-MM-DD"):
+        load_config(str(path))
+
+
+def test_scan_from_without_scan_to_errors(tmp_path):
+    config = {
+        "team": {
+            "name": "T",
+            "code": "t",
+            "projects": ["a/b"],
+            "scan_from": "2026-01-01",
+        }
+    }
+    path = tmp_path / "from-only.yaml"
+    path.write_text(yaml.dump(config))
+    with pytest.raises(ValueError, match="scan_from and team.scan_to must both be set"):
+        load_config(str(path))
+
+
 def test_missing_team_projects(tmp_path):
     config = {"team": {"name": "T", "code": "t", "members": ["u"]}}
     path = tmp_path / "no-projects.yaml"
