@@ -5,6 +5,7 @@ import re
 from datetime import date
 
 import click
+import yaml
 
 from ai_fluency_collector.config import load_config
 from ai_fluency_collector.gitlab_client import (
@@ -45,7 +46,21 @@ def validate_period(period: str) -> str:
     return period
 
 
-@click.command()
+def _slugify(text: str) -> str:
+    """Convert text to a URL-friendly slug."""
+    slug = text.lower().strip()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    slug = re.sub(r"[\s_]+", "-", slug)
+    slug = re.sub(r"-+", "-", slug)
+    return slug.strip("-")
+
+
+@click.group()
+def main():
+    """AI Fluency Collector - Scan GitLab repositories for AI adoption signals."""
+
+
+@main.command()
 @click.option(
     "--config",
     "config_path",
@@ -74,7 +89,7 @@ def validate_period(period: str) -> str:
     default=False,
     help="Show detailed debug output during scanning.",
 )
-def main(
+def scan(
     config_path: str,
     period: str | None,
     gitlab_url: str | None,
@@ -190,7 +205,7 @@ def main(
 
     # 8. Scan for CI config patterns
     click.echo("Scanning CI configurations...")
-    ci_scanner = CIScanner(client)
+    ci_scanner = CIScanner(client, ci_signals=team.ci_signals)
     all_ci_results: list[dict[str, bool]] = []
 
     for project in team.projects:
@@ -248,3 +263,277 @@ def main(
     click.echo(f"  Sources: {num_sources}")
     click.echo(f"  Signals: {total_signals}")
     click.echo(f"  Team:    {team.code}")
+
+
+@main.command()
+def init() -> None:
+    """Interactive setup wizard to create a team config YAML file."""
+    click.echo("AI Fluency Collector — Team Setup Wizard")
+    click.echo()
+
+    # Step 1: Basics
+    click.echo("Step 1: Basics")
+    gitlab_url = click.prompt("GitLab URL", default="https://gitlab.com")
+    team_name = click.prompt("Team name")
+    suggested_code = _slugify(team_name)
+    team_code = click.prompt("Team code", default=suggested_code)
+    click.echo()
+
+    # Step 2: Token check
+    click.echo("Step 2: Token check")
+    token = os.environ.get("GITLAB_TOKEN")
+    if not token:
+        click.echo("Error: GITLAB_TOKEN environment variable is not set.")
+        click.echo("Export a token with read_api scope and re-run.")
+        raise SystemExit(1)
+
+    client = GitLabClient(token, base_url=gitlab_url)
+    try:
+        client.validate_token()
+    except (GitLabAuthError, GitLabServerError) as e:
+        click.echo(f"Error: {e}")
+        raise SystemExit(1) from e
+
+    # Fetch username for display
+    try:
+        resp = client.session.get(client._api_url("/user"))
+        user_data = resp.json()
+        username = user_data.get("username", "unknown")
+        click.echo(f"Connected as: {username}")
+    except Exception:
+        click.echo("Token valid.")
+    click.echo()
+
+    # Step 3: Members
+    click.echo("Step 3: Team members")
+    click.echo("Enter GitLab usernames one at a time (empty line to finish):")
+    members: list[str] = []
+    while True:
+        member = click.prompt("  Username", default="", show_default=False)
+        if not member:
+            if not members:
+                click.echo("  At least one member is required.")
+                continue
+            break
+        try:
+            client.get_user(member)
+            members.append(member)
+            click.echo(f"    Found: {member}")
+        except GitLabUserNotFoundError:
+            click.echo(f"    Error: User '{member}' not found. Try again.")
+    click.echo()
+
+    # Step 4: Projects
+    click.echo("Step 4: Projects")
+    click.echo("Enter project paths one at a time (empty line to finish):")
+    projects: list[str] = []
+    project_default_branches: dict[str, str] = {}
+    while True:
+        project = click.prompt("  Project path", default="", show_default=False)
+        if not project:
+            if not projects:
+                click.echo("  At least one project is required.")
+                continue
+            break
+        try:
+            branches = client.get_branches(project)
+            default_branch = "main"
+            for b in branches:
+                if b.get("default"):
+                    default_branch = b["name"]
+                    break
+            projects.append(project)
+            project_default_branches[project] = default_branch
+            click.echo(f"    Found: {len(branches)} branches, default: {default_branch}")
+        except (GitLabAccessError, GitLabAuthError, GitLabServerError) as e:
+            click.echo(
+                f"    Error: {e} "
+                "(path should match the URL after your GitLab domain, "
+                "e.g. 'group/project' not 'gitlab.com/group/project')"
+            )
+    click.echo()
+
+    # Step 5: CI Pattern Discovery
+    click.echo("Step 5: CI pattern discovery")
+    all_ci_items: list[dict[str, str]] = []
+
+    for project in projects:
+        default_branch = project_default_branches.get(project, "HEAD")
+        click.echo(f"  Scanning {project}...")
+
+        content = client.get_file_content(project, ".gitlab-ci.yml", ref=default_branch)
+        if content is None:
+            click.echo("    No .gitlab-ci.yml found.")
+            continue
+
+        try:
+            ci_config = yaml.safe_load(content)
+        except yaml.YAMLError:
+            click.echo("    Could not parse .gitlab-ci.yml.")
+            continue
+
+        if not isinstance(ci_config, dict):
+            click.echo("    Invalid .gitlab-ci.yml format.")
+            continue
+
+        # Extract includes and job names from root config
+        _collect_ci_items(ci_config, all_ci_items, project)
+
+        # Follow local includes
+        includes = ci_config.get("include")
+        local_paths: list[str] = []
+        if isinstance(includes, list):
+            for item in includes:
+                if isinstance(item, dict) and "local" in item:
+                    local_paths.append(item["local"])
+        elif isinstance(includes, dict) and "local" in includes:
+            local_paths.append(includes["local"])
+
+        for local_path in local_paths:
+            clean_path = local_path.lstrip("/")
+            local_content = client.get_file_content(project, clean_path, ref=default_branch)
+            if local_content is None:
+                continue
+            try:
+                local_config = yaml.safe_load(local_content)
+            except yaml.YAMLError:
+                continue
+            if isinstance(local_config, dict):
+                _collect_ci_items(local_config, all_ci_items, project)
+
+    ci_signals_config: dict[str, list[str]] = {}
+
+    if all_ci_items:
+        click.echo()
+        click.echo("  Found CI items:")
+        for i, item in enumerate(all_ci_items, 1):
+            click.echo(f"    {i}. [{item['type']}] {item['value']}  ({item['project']})")
+        click.echo()
+
+        # Tag AI-related items
+        ai_input = click.prompt(
+            "  Which are AI-related? (comma-separated numbers, or 'skip')",
+            default="skip",
+        )
+        ai_items = _parse_selection(ai_input, all_ci_items)
+        if ai_items:
+            ci_signals_config["ai-code-review"] = ai_items
+
+        # Tag security-related items
+        sec_input = click.prompt(
+            "  Which are security-related? (comma-separated numbers, or 'skip')",
+            default="skip",
+        )
+        sec_items = _parse_selection(sec_input, all_ci_items)
+        if sec_items:
+            ci_signals_config["sast-dast"] = sec_items
+
+        # Tag deployment gates
+        deploy_input = click.prompt(
+            "  Which are deployment gates? (comma-separated numbers, or 'skip')",
+            default="skip",
+        )
+        deploy_items = _parse_selection(deploy_input, all_ci_items)
+        if deploy_items:
+            ci_signals_config["deployment-gates"] = deploy_items
+    else:
+        click.echo("  No CI items found across projects.")
+
+    click.echo()
+
+    # Step 6: Write config
+    default_filename = f"{team_code}.yaml"
+    click.echo("Step 6: Write config")
+    output_filename = click.prompt("Output filename", default=default_filename)
+
+    config_data: dict = {
+        "team": {
+            "gitlab_url": gitlab_url,
+            "name": team_name,
+            "code": team_code,
+            "members": members,
+            "projects": projects,
+        }
+    }
+
+    if ci_signals_config:
+        config_data["team"]["ci_signals"] = ci_signals_config
+
+    with open(output_filename, "w") as f:
+        yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+
+    click.echo()
+    click.echo(f"Config written to: {output_filename}")
+    click.echo()
+    click.echo("Summary:")
+    click.echo(f"  Team:     {team_name} ({team_code})")
+    click.echo(f"  GitLab:   {gitlab_url}")
+    click.echo(f"  Members:  {len(members)}")
+    click.echo(f"  Projects: {len(projects)}")
+    if ci_signals_config:
+        click.echo(f"  CI signals: {len(ci_signals_config)} categories")
+    click.echo()
+    click.echo(f"Run: afc scan --config {output_filename}")
+
+
+def _collect_ci_items(
+    ci_config: dict,
+    items: list[dict[str, str]],
+    project: str,
+) -> None:
+    """Extract include paths and job names from a CI config into items list."""
+    # Extract includes
+    includes = ci_config.get("include")
+    if includes is not None:
+        if isinstance(includes, str):
+            items.append({"type": "include", "value": includes, "project": project})
+        elif isinstance(includes, list):
+            for inc in includes:
+                if isinstance(inc, str):
+                    items.append({"type": "include", "value": inc, "project": project})
+                elif isinstance(inc, dict):
+                    if "template" in inc:
+                        items.append(
+                            {"type": "template", "value": inc["template"], "project": project}
+                        )
+                    if "local" in inc:
+                        items.append({"type": "local", "value": inc["local"], "project": project})
+                    if "project" in inc and "file" in inc:
+                        files = inc["file"]
+                        if isinstance(files, str):
+                            files = [files]
+                        for f in files:
+                            items.append(
+                                {
+                                    "type": "project",
+                                    "value": f"{inc['project']}:{f}",
+                                    "project": project,
+                                }
+                            )
+        elif isinstance(includes, dict):
+            if "template" in includes:
+                items.append(
+                    {"type": "template", "value": includes["template"], "project": project}
+                )
+            if "local" in includes:
+                items.append({"type": "local", "value": includes["local"], "project": project})
+
+    # Extract job names
+    skip_keys = {"include", "stages", "variables", "default", "workflow", "image", "services"}
+    for key in ci_config:
+        if key not in skip_keys:
+            items.append({"type": "job", "value": key, "project": project})
+
+
+def _parse_selection(input_str: str, items: list[dict[str, str]]) -> list[str]:
+    """Parse comma-separated numbers into a list of item values."""
+    if input_str.strip().lower() == "skip" or not input_str.strip():
+        return []
+    result: list[str] = []
+    for part in input_str.split(","):
+        part = part.strip()
+        if part.isdigit():
+            idx = int(part) - 1
+            if 0 <= idx < len(items):
+                result.append(items[idx]["value"])
+    return result

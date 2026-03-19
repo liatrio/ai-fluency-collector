@@ -34,15 +34,23 @@ def _setup_mock_client(mock_client_cls):
 
 def test_help_output():
     runner = CliRunner()
-    result = runner.invoke(main, ["--help"])
+    result = runner.invoke(main, ["scan", "--help"])
     assert result.exit_code == 0
     assert "--config" in result.output
     assert "--period" in result.output
 
 
+def test_group_help_output():
+    runner = CliRunner()
+    result = runner.invoke(main, ["--help"])
+    assert result.exit_code == 0
+    assert "scan" in result.output
+    assert "init" in result.output
+
+
 def test_missing_config_file():
     runner = CliRunner()
-    result = runner.invoke(main, ["--config", "nonexistent.yaml"])
+    result = runner.invoke(main, ["scan", "--config", "nonexistent.yaml"])
     assert result.exit_code != 0
     assert "Config file not found" in result.output
     assert "config.example.yaml" in result.output
@@ -52,7 +60,7 @@ def test_missing_gitlab_token(tmp_path, monkeypatch):
     monkeypatch.delenv("GITLAB_TOKEN", raising=False)
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
-    result = runner.invoke(main, ["--config", config_path])
+    result = runner.invoke(main, ["scan", "--config", config_path])
     assert result.exit_code != 0
     assert "GITLAB_TOKEN" in result.output
     assert "read_api" in result.output
@@ -62,7 +70,7 @@ def test_invalid_period_format(tmp_path, monkeypatch):
     monkeypatch.setenv("GITLAB_TOKEN", "test-token")
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
-    result = runner.invoke(main, ["--config", config_path, "--period", "bad"])
+    result = runner.invoke(main, ["scan", "--config", config_path, "--period", "bad"])
     assert result.exit_code != 0
     assert "Invalid period format" in result.output
     assert "YYYY-WNN" in result.output
@@ -72,7 +80,7 @@ def test_invalid_period_week_zero(tmp_path, monkeypatch):
     monkeypatch.setenv("GITLAB_TOKEN", "test-token")
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
-    result = runner.invoke(main, ["--config", config_path, "--period", "2026-W00"])
+    result = runner.invoke(main, ["scan", "--config", config_path, "--period", "2026-W00"])
     assert result.exit_code != 0
     assert "Invalid period format" in result.output
 
@@ -87,7 +95,7 @@ def test_startup_banner(mock_client_cls, mock_member_cls, tmp_path, monkeypatch)
     ]
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
-    result = runner.invoke(main, ["--config", config_path, "--period", "2026-W12"])
+    result = runner.invoke(main, ["scan", "--config", config_path, "--period", "2026-W12"])
     assert result.exit_code == 0
     assert "Test Team" in result.output
     assert "2026-W12" in result.output
@@ -105,7 +113,7 @@ def test_default_period_uses_current_week(mock_client_cls, mock_member_cls, tmp_
     ]
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
-    result = runner.invoke(main, ["--config", config_path])
+    result = runner.invoke(main, ["scan", "--config", config_path])
     assert result.exit_code == 0
     assert "-W" in result.output
 
@@ -121,7 +129,7 @@ def test_invalid_gitlab_token(mock_client_cls, tmp_path, monkeypatch):
     )
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
-    result = runner.invoke(main, ["--config", config_path, "--period", "2026-W12"])
+    result = runner.invoke(main, ["scan", "--config", config_path, "--period", "2026-W12"])
     assert result.exit_code != 0
     assert "authentication failed" in result.output
 
@@ -136,7 +144,7 @@ def test_member_scanning_in_output(mock_client_cls, mock_member_cls, tmp_path, m
     ]
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
-    result = runner.invoke(main, ["--config", config_path, "--period", "2026-W12"])
+    result = runner.invoke(main, ["scan", "--config", config_path, "--period", "2026-W12"])
     assert result.exit_code == 0
     assert "Scanning member activity" in result.output
     assert "alice.smith" in result.output
@@ -149,7 +157,7 @@ def test_validate_flag(mock_client_cls, tmp_path, monkeypatch):
     client.get_branches.return_value = [{"name": "main"}]
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
-    result = runner.invoke(main, ["--config", config_path, "--validate"])
+    result = runner.invoke(main, ["scan", "--config", config_path, "--validate"])
     assert result.exit_code == 0
     assert "Validation Mode" in result.output
     assert "Token:    valid" in result.output
@@ -184,7 +192,7 @@ def test_gitlab_url_from_config(mock_client_cls, mock_member_cls, tmp_path, monk
     ]
     config_path = _write_config_with_gitlab_url(tmp_path, "https://gitlab.example.com")
     runner = CliRunner()
-    result = runner.invoke(main, ["--config", config_path, "--period", "2026-W12"])
+    result = runner.invoke(main, ["scan", "--config", config_path, "--period", "2026-W12"])
     assert result.exit_code == 0
     # Client should be constructed with the config URL
     mock_client_cls.assert_called_once_with("test-token", base_url="https://gitlab.example.com")
@@ -202,7 +210,15 @@ def test_gitlab_url_cli_overrides_config(mock_client_cls, mock_member_cls, tmp_p
     runner = CliRunner()
     result = runner.invoke(
         main,
-        ["--config", config_path, "--period", "2026-W12", "--gitlab-url", "https://custom.gl"],
+        [
+            "scan",
+            "--config",
+            config_path,
+            "--period",
+            "2026-W12",
+            "--gitlab-url",
+            "https://custom.gl",
+        ],
     )
     assert result.exit_code == 0
     # CLI flag should take precedence

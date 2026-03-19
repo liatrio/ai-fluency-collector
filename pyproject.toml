@@ -23,6 +23,7 @@ dev = [
 [project.scripts]
 ai-fluency-collector = "ai_fluency_collector.cli:main"
 afc = "ai_fluency_collector.cli:main"
+# main is now a click.Group with subcommands: scan, init
 
 [tool.setuptools.packages.find]
 where = ["src"]

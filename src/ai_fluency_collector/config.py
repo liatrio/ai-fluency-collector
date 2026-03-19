@@ -13,6 +13,7 @@ class TeamConfig:
     members: list[str] = field(default_factory=list)
     projects: list[str] = field(default_factory=list)
     gitlab_url: str = "https://gitlab.com"
+    ci_signals: dict[str, list[str]] = field(default_factory=dict)
 
 
 def load_config(path: str) -> TeamConfig:
@@ -66,10 +67,21 @@ def load_config(path: str) -> TeamConfig:
     if not isinstance(gitlab_url, str) or not gitlab_url:
         raise ValueError("team.gitlab_url must be a non-empty string")
 
+    ci_signals: dict[str, list[str]] = {}
+    raw_signals = team.get("ci_signals")
+    if raw_signals is not None:
+        if not isinstance(raw_signals, dict):
+            raise ValueError("team.ci_signals must be a mapping")
+        for key, val in raw_signals.items():
+            if not isinstance(val, list):
+                raise ValueError(f"team.ci_signals.{key} must be a list of strings")
+            ci_signals[key] = [str(v) for v in val]
+
     return TeamConfig(
         name=team["name"],
         code=team["code"],
         members=members,
         projects=projects,
         gitlab_url=gitlab_url,
+        ci_signals=ci_signals,
     )

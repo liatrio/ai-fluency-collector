@@ -202,12 +202,68 @@ def _analyze_ci_config(ci_config: dict, templates: list[str]) -> dict[str, bool]
     }
 
 
+def _check_ci_signals(
+    ci_config: dict,
+    templates: list[str],
+    ci_signals: dict[str, list[str]],
+) -> dict[str, bool]:
+    """Check user-declared ci_signals against job names and include paths.
+
+    For each pattern type in ci_signals, check if ANY of the declared strings
+    appear as a substring in any job name or any include/template path.
+    Returns {pattern_id: True/False} only for pattern IDs present in ci_signals.
+    """
+    results: dict[str, bool] = {}
+
+    # Collect all job names from the config
+    skip_keys = (
+        "include",
+        "stages",
+        "variables",
+        "default",
+        "workflow",
+        "image",
+        "services",
+    )
+    job_names: list[str] = []
+    for key in ci_config:
+        if key not in skip_keys:
+            job_names.append(key)
+
+    for pattern_id, signal_strings in ci_signals.items():
+        found = False
+        for signal in signal_strings:
+            # Check against job names
+            for job_name in job_names:
+                if signal in job_name:
+                    found = True
+                    break
+            if found:
+                break
+            # Check against template/include paths
+            for tmpl in templates:
+                if signal in tmpl:
+                    found = True
+                    break
+            if found:
+                break
+        results[pattern_id] = found
+
+    return results
+
+
 class CIScanner:
     """Scans GitLab projects for CI pipeline patterns in .gitlab-ci.yml."""
 
-    def __init__(self, client: GitLabClient, active_days: int = 90) -> None:
+    def __init__(
+        self,
+        client: GitLabClient,
+        active_days: int = 90,
+        ci_signals: dict[str, list[str]] | None = None,
+    ) -> None:
         self.client = client
         self.active_days = active_days
+        self.ci_signals = ci_signals or {}
 
     def _parse_yaml(self, content: str) -> dict | None:
         """Parse YAML content, returning None on failure."""
@@ -231,10 +287,14 @@ class CIScanner:
 
         templates, local_paths = _extract_includes(ci_config)
 
+        # Collect all templates across root and local includes for signal checking
+        all_templates = list(templates)
+
         # Start with analysis of the root CI file
         results = _analyze_ci_config(ci_config, templates)
 
         # Fetch and scan local includes
+        all_configs = [ci_config]
         for local_path in local_paths:
             # Strip leading slash if present
             clean_path = local_path.lstrip("/")
@@ -245,13 +305,23 @@ class CIScanner:
             if local_config is None:
                 continue
 
+            all_configs.append(local_config)
             local_templates, _ = _extract_includes(local_config)
+            all_templates.extend(local_templates)
             local_results = _analyze_ci_config(local_config, local_templates)
 
             # Merge: if any included file has a pattern, mark it as found
             for pid, found in local_results.items():
                 if found:
                     results[pid] = True
+
+        # Check user-declared ci_signals across all configs
+        if self.ci_signals:
+            for config in all_configs:
+                signal_results = _check_ci_signals(config, all_templates, self.ci_signals)
+                for pid, found in signal_results.items():
+                    if found and pid in results:
+                        results[pid] = True
 
         return results
 
