@@ -56,7 +56,7 @@ def _parse_date(date_str: str) -> date:
     except ValueError:
         raise click.BadParameter(
             f"Invalid date format: {date_str}. Expected YYYY-MM-DD (e.g. 2026-01-01)"
-        )
+        ) from None
 
 
 def _dates_to_iso_weeks(from_str: str, to_str: str) -> list[str]:
