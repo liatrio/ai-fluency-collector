@@ -34,6 +34,21 @@ This document describes every artifact and CI pattern the collector detects, whi
 | `deployment-gates` | Deploy stages with environment and rules | `sdlc-deployment` | 0.5 |
 | `deployment-gates` | (same) | `tg-supervised-auto` | 0.5 |
 
+## CI Pipeline Metrics
+
+Computed from GitLab pipeline history for the survey period. Scores are team-level with no individual attribution.
+
+| Metric Key | What It Measures | Skill ID | Score Formula |
+|---|---|---|---|
+| `pipeline_pass_rate` | % of commits whose first CI pipeline run succeeded (first-attempt pass rate) | `pm-core` | `rate × 100` |
+| `pipeline_pass_rate` | (same) | `tg-code-review` | `rate × 100` |
+
+**Aggregation**: Mean first-attempt pass rate across all team projects that have pipeline data for the period. Projects with no pipelines are excluded from the mean.
+
+**Evidence format**: "78% of pipelines passed on first attempt (N=47 pipelines)"
+
+Mappings live in `src/ai_fluency_collector/scoring.py` as `CI_PIPELINE_SKILL_MAPPINGS`.
+
 ## Member Activity Mappings
 
 | Pattern ID | What It Detects | Skill ID | Weight |

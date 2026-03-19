@@ -34,6 +34,15 @@ CI_SKILL_MAPPINGS: list[dict] = [
 ]
 
 
+# CI pipeline pass rate → skill mappings.
+# score_fn takes the mean first-attempt pass rate (float 0.0–1.0) and returns an int score 0–100.
+CI_PIPELINE_SKILL_MAPPINGS: dict[str, list[dict]] = {
+    "pipeline_pass_rate": [
+        {"skill_id": "pm-core", "score_fn": lambda rate: round(rate * 100)},
+        {"skill_id": "tg-code-review", "score_fn": lambda rate: round(rate * 100)},
+    ],
+}
+
 # Review behavioral metrics → skill mappings.
 # score_fn takes the computed metric rate (float 0.0–1.0) and returns an int score 0–100.
 REVIEW_SKILL_MAPPINGS: dict[str, list[dict]] = {
@@ -57,6 +66,44 @@ MEMBER_SKILL_MAPPINGS: list[dict] = [
     {"artifact_id": "coauthor-cursor", "skill_id": "im-autocomplete", "weight": 0.3},
     {"artifact_id": "coauthor-cursor", "skill_id": "im-inline-edit", "weight": 0.3},
 ]
+
+
+def calculate_pipeline_scores(
+    project_results: list,
+    mappings: dict[str, list[dict]],
+) -> list[dict]:
+    """Calculate skill scores from per-project pipeline pass rate data.
+
+    Aggregates across projects using mean first-attempt pass rate.
+    Projects with no pipelines in the period are excluded from the mean.
+
+    Args:
+        project_results: List of PipelinePassResult objects (from CIScanner).
+        mappings: CI_PIPELINE_SKILL_MAPPINGS dict.
+
+    Returns:
+        List of {skill_id, score, evidence} dicts. Empty if no pipelines found.
+    """
+    projects_with_data = [r for r in project_results if r.total_count > 0]
+    if not projects_with_data:
+        return []
+
+    mean_rate = (
+        sum(r.pass_count / r.total_count for r in projects_with_data) / len(projects_with_data)
+    )
+    total_pipelines = sum(r.total_count for r in projects_with_data)
+    pct = round(mean_rate * 100)
+    evidence = f"{pct}% of pipelines passed on first attempt (N={total_pipelines} pipelines)"
+
+    signals: list[dict] = []
+    for skill_maps in mappings.values():
+        for m in skill_maps:
+            score = m["score_fn"](mean_rate)
+            if score <= 0:
+                continue
+            signals.append({"skill_id": m["skill_id"], "score": score, "evidence": evidence})
+
+    return signals
 
 
 def calculate_review_scores(metrics, mappings: dict) -> list[dict]:

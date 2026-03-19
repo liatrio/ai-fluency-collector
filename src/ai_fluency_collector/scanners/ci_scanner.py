@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from datetime import date
 
 import yaml
 
@@ -252,6 +254,23 @@ def _check_ci_signals(
     return results
 
 
+@dataclass
+class PipelinePassResult:
+    """First-attempt pipeline pass counts for a single project."""
+
+    pass_count: int
+    total_count: int
+
+
+def _period_to_date_range(period: str) -> tuple[str, str]:
+    """Convert YYYY-WNN to (start_date, end_date) as ISO 8601 date strings."""
+    year = int(period[:4])
+    week = int(period[6:])
+    start = date.fromisocalendar(year, week, 1)
+    end = date.fromisocalendar(year, week, 7)
+    return start.isoformat(), end.isoformat()
+
+
 class CIScanner:
     """Scans GitLab projects for CI pipeline patterns in .gitlab-ci.yml."""
 
@@ -356,3 +375,44 @@ class CIScanner:
                 break
 
         return results
+
+    def scan_pipeline_pass_rate(self, project_path: str, period: str) -> PipelinePassResult:
+        """Compute first-attempt pipeline pass rate for a project over a survey period.
+
+        Groups pipelines by commit SHA and takes the first (lowest id) pipeline
+        per SHA to determine whether that commit passed CI on first attempt.
+
+        Args:
+            project_path: GitLab project path (e.g. 'group/project').
+            period: Survey period in YYYY-WNN format.
+
+        Returns:
+            PipelinePassResult with pass_count and total_count.
+            total_count is 0 when no pipelines exist for the period.
+        """
+        start_date, end_date = _period_to_date_range(period)
+        pipelines = self.client.get_pipelines(
+            project_path, updated_after=start_date, updated_before=end_date
+        )
+
+        if not pipelines:
+            return PipelinePassResult(pass_count=0, total_count=0)
+
+        # Group by commit SHA, keep all pipelines per SHA
+        sha_pipelines: dict[str, list[dict]] = {}
+        for p in pipelines:
+            sha = p.get("sha", "")
+            if sha not in sha_pipelines:
+                sha_pipelines[sha] = []
+            sha_pipelines[sha].append(p)
+
+        pass_count = 0
+        total_count = 0
+        for pipes in sha_pipelines.values():
+            # Lowest id = earliest pipeline run for this commit
+            first = min(pipes, key=lambda p: p.get("id", 0))
+            total_count += 1
+            if first.get("status") == "success":
+                pass_count += 1
+
+        return PipelinePassResult(pass_count=pass_count, total_count=total_count)

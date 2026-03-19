@@ -338,6 +338,49 @@ class GitLabClient:
             page += 1
         return results
 
+    def get_pipelines(
+        self,
+        project_path: str,
+        updated_after: str | None = None,
+        updated_before: str | None = None,
+    ) -> list[dict]:
+        """Get pipelines for a project, optionally filtered by date range.
+
+        Returns list of pipeline dicts with 'id', 'sha', 'status', 'created_at'.
+        """
+        encoded_project = self._encode_project(project_path)
+        url = self._api_url(f"/projects/{encoded_project}/pipelines")
+        params: dict = {"per_page": 100}
+        if updated_after:
+            params["updated_after"] = updated_after
+        if updated_before:
+            params["updated_before"] = updated_before
+        results: list[dict] = []
+        page = 1
+        while True:
+            params["page"] = page
+            resp = self.session.get(url, params=params)
+            _check_server_error(resp, f"listing pipelines for '{project_path}'")
+            if resp.status_code == 404:
+                return []
+            if resp.status_code == 401:
+                raise GitLabAuthError(
+                    "GitLab authentication failed. "
+                    "Check that GITLAB_TOKEN is valid and has read_api scope."
+                )
+            if resp.status_code == 403:
+                raise GitLabAccessError(
+                    f"Access denied to project '{project_path}'. "
+                    "Check that the token has access to this project."
+                )
+            resp.raise_for_status()
+            items = resp.json()
+            if not items:
+                break
+            results.extend(items)
+            page += 1
+        return results
+
     def get_project_commits(
         self,
         project_id: int,

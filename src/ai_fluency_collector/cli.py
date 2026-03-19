@@ -22,10 +22,12 @@ from ai_fluency_collector.scanners.member_scanner import MemberScanner
 from ai_fluency_collector.scanners.review_scanner import ReviewScanner
 from ai_fluency_collector.scoring import (
     ARTIFACT_SKILL_MAPPINGS,
+    CI_PIPELINE_SKILL_MAPPINGS,
     CI_SKILL_MAPPINGS,
     MEMBER_SKILL_MAPPINGS,
     REVIEW_SKILL_MAPPINGS,
     calculate_member_scores,
+    calculate_pipeline_scores,
     calculate_review_scores,
     calculate_scores,
 )
@@ -360,7 +362,7 @@ def scan(
     click.echo(f"  → {len(member_signals)} member activity signals detected")
     click.echo()
 
-    # 16–17. Per-week: review signals → output file
+    # 16–18. Per-week: pipeline pass rate + review signals → output file
     review_scanner = ReviewScanner(client)
     output_paths: list[str] = []
     total_signals_all = len(artifact_signals) + len(ci_signals) + len(member_signals)
@@ -369,7 +371,22 @@ def scan(
         if multi_week:
             click.echo(f"Scanning week {week} ({idx}/{len(periods)})...")
         else:
-            click.echo("Scanning MR review patterns...")
+            click.echo("Scanning pipeline pass rates and MR review patterns...")
+
+        # Pipeline pass rate (period-specific CI signal)
+        pipeline_results = []
+        for project in team.projects:
+            try:
+                result = ci_scanner.scan_pipeline_pass_rate(project, week)
+            except (GitLabAccessError, GitLabAuthError, GitLabServerError) as e:
+                raise click.ClickException(str(e)) from e
+            pipeline_results.append(result)
+        pipeline_signals = calculate_pipeline_scores(pipeline_results, CI_PIPELINE_SKILL_MAPPINGS)
+        total_pipelines = sum(r.total_count for r in pipeline_results)
+        click.echo(f"  {total_pipelines} pipelines analyzed across projects")
+        click.echo(f"  → {len(pipeline_signals)} pipeline signals detected")
+
+        week_ci_signals = ci_signals + pipeline_signals
 
         review_metrics = review_scanner.scan(effective_members, week)
         review_signals = calculate_review_scores(review_metrics, REVIEW_SKILL_MAPPINGS)
@@ -377,7 +394,7 @@ def scan(
         click.echo(f"  → {len(review_signals)} review signals detected")
 
         data = build_output(
-            team.code, week, artifact_signals, ci_signals, member_signals, review_signals
+            team.code, week, artifact_signals, week_ci_signals, member_signals, review_signals
         )
         output_path = write_output(data, team.code, week)
         output_paths.append(output_path)
