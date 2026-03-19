@@ -1,0 +1,74 @@
+name: Feature Request
+description: Suggest a new capability or improvement to the collector.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement. The more context you provide, the easier it is to evaluate and prioritize.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the gap or pain point this feature would address.
+      placeholder: I find it frustrating when... / There is no way to currently...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe what you would like to see. Be as specific as you can.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Have you found any workarounds or alternative approaches?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the tool does this relate to?
+      options:
+        - Artifact scanning
+        - CI pipeline scanning
+        - Member activity scanning
+        - Scoring / output JSON
+        - Config / init wizard
+        - CLI / UX
+        - GitLab API / authentication
+        - New signal source
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: effort
+    attributes:
+      label: Estimated effort
+      description: Your best guess at the scope of work involved.
+      options:
+        - Small (a config change or minor tweak)
+        - Medium (a new scanner pattern or scoring rule)
+        - Large (a new signal source or major refactor)
+        - Not sure
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Any other information, examples, or references that would help.
+    validations:
+      required: false

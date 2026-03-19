@@ -1,0 +1,152 @@
+name: Project Board Automation
+
+# Keeps the AI Fluency Kanban (project #180) in sync with PRs.
+#
+# Triggers:
+#   - PR opened/reopened → linked issues move to "In Review"
+#   - PR merged          → linked issues move to "Done" and are closed
+#
+# Requires a repo secret named PROJECT_TOKEN containing a classic PAT
+# with scopes: repo, project
+# (GITHUB_TOKEN cannot write to org-level projects)
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, closed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+env:
+  PROJECT_NUMBER: 180
+  PROJECT_OWNER: liatrio
+  STATUS_FIELD_ID: PVTSSF_lADOAFdhms4BSDEFzg_sjHM
+  STATUS_IN_REVIEW: df73e18b
+  STATUS_DONE: 98236657
+
+jobs:
+  # ── PR opened → In Review ───────────────────────────────────────
+  move-to-in-review:
+    name: Move linked issues → In Review
+    if: github.event.action == 'opened' || github.event.action == 'reopened'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract and update linked issues
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::PROJECT_TOKEN secret is not configured. Create a Classic PAT with repo+project scopes and add it as PROJECT_TOKEN in repository secrets."
+            exit 1
+          fi
+
+          # Parse issue numbers from "Closes #N", "Fixes #N", "Resolves #N"
+          ISSUES=$(echo "$PR_BODY" | grep -oiP '(?:closes|fixes|resolves)\s+#\K\d+' || true)
+
+          if [ -z "$ISSUES" ]; then
+            echo "No linked issues found in PR body."
+            exit 0
+          fi
+
+          for ISSUE_NUM in $ISSUES; do
+            echo "Updating issue #$ISSUE_NUM → In Review"
+
+            # Get the project item ID for this issue
+            ITEM_ID=$(gh api graphql -f query="
+              {
+                repository(owner: \"${{ github.repository_owner }}\", name: \"${{ github.event.repository.name }}\") {
+                  issue(number: $ISSUE_NUM) {
+                    projectItems(first: 10) {
+                      nodes {
+                        id
+                        project { number }
+                      }
+                    }
+                  }
+                }
+              }
+            " --jq ".data.repository.issue.projectItems.nodes[] | select(.project.number == $PROJECT_NUMBER) | .id")
+
+            if [ -z "$ITEM_ID" ]; then
+              echo "Issue #$ISSUE_NUM not found on project board — skipping."
+              continue
+            fi
+
+            # Update status to In Review
+            gh project item-edit \
+              --id "$ITEM_ID" \
+              --field-id "$STATUS_FIELD_ID" \
+              --single-select-option-id "$STATUS_IN_REVIEW" \
+              --project-id "$(gh api graphql -f query='{ organization(login: "${{ env.PROJECT_OWNER }}") { projectV2(number: ${{ env.PROJECT_NUMBER }}) { id } } }' --jq '.data.organization.projectV2.id')"
+
+            echo "Issue #$ISSUE_NUM moved to In Review."
+          done
+
+  # ── PR merged → Done ────────────────────────────────────────────
+  move-to-done:
+    name: Move linked issues → Done
+    if: github.event.action == 'closed' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract and close linked issues
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::PROJECT_TOKEN secret is not configured. Create a Classic PAT with repo+project scopes and add it as PROJECT_TOKEN in repository secrets."
+            exit 1
+          fi
+
+          ISSUES=$(echo "$PR_BODY" | grep -oiP '(?:closes|fixes|resolves)\s+#\K\d+' || true)
+
+          if [ -z "$ISSUES" ]; then
+            echo "No linked issues found in PR body."
+            exit 0
+          fi
+
+          # Resolve project node ID once
+          PROJECT_NODE_ID=$(gh api graphql -f query='
+            {
+              organization(login: "${{ env.PROJECT_OWNER }}") {
+                projectV2(number: ${{ env.PROJECT_NUMBER }}) { id }
+              }
+            }
+          ' --jq '.data.organization.projectV2.id')
+
+          for ISSUE_NUM in $ISSUES; do
+            echo "Closing issue #$ISSUE_NUM → Done"
+
+            ITEM_ID=$(gh api graphql -f query="
+              {
+                repository(owner: \"${{ github.repository_owner }}\", name: \"${{ github.event.repository.name }}\") {
+                  issue(number: $ISSUE_NUM) {
+                    projectItems(first: 10) {
+                      nodes {
+                        id
+                        project { number }
+                      }
+                    }
+                  }
+                }
+              }
+            " --jq ".data.repository.issue.projectItems.nodes[] | select(.project.number == $PROJECT_NUMBER) | .id")
+
+            if [ -n "$ITEM_ID" ]; then
+              gh project item-edit \
+                --id "$ITEM_ID" \
+                --field-id "$STATUS_FIELD_ID" \
+                --single-select-option-id "$STATUS_DONE" \
+                --project-id "$PROJECT_NODE_ID"
+              echo "Issue #$ISSUE_NUM moved to Done."
+            fi
+
+            # Close the issue
+            gh issue close "$ISSUE_NUM" \
+              --repo "${{ github.repository }}" \
+              --comment "Closed automatically when PR #${{ github.event.pull_request.number }} was merged."
+          done
