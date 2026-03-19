@@ -170,17 +170,19 @@ def test_scan_from_without_scan_to_errors(tmp_path):
         load_config(str(path))
 
 
-def test_missing_team_projects(tmp_path):
+def test_missing_team_projects_is_allowed(tmp_path):
+    """projects is optional; omitting it yields an empty list (validated at scan time)."""
     config = {"team": {"name": "T", "code": "t", "members": ["u"]}}
     path = tmp_path / "no-projects.yaml"
     path.write_text(yaml.dump(config))
-    with pytest.raises(ValueError, match="team.projects"):
-        load_config(str(path))
+    result = load_config(str(path))
+    assert result.projects == []
 
 
-def test_empty_projects_list(tmp_path):
+def test_empty_projects_list_is_allowed(tmp_path):
+    """An empty projects list is valid for GitHub-only teams."""
     config = {"team": {"name": "T", "code": "t", "members": ["u"], "projects": []}}
     path = tmp_path / "empty-projects.yaml"
     path.write_text(yaml.dump(config))
-    with pytest.raises(ValueError, match="non-empty list"):
-        load_config(str(path))
+    result = load_config(str(path))
+    assert result.projects == []

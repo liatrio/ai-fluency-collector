@@ -392,6 +392,150 @@ def scan(
     click.echo(f"  Signals: {total_signals_all} shared + review signals per week")
 
 
+@main.command("github-scan")
+@click.option(
+    "--config",
+    "config_path",
+    required=True,
+    help="Path to team configuration YAML file.",
+)
+@click.option(
+    "--period",
+    default=None,
+    help="Survey period in YYYY-WNN format (defaults to current ISO week).",
+)
+@click.option(
+    "--usernames",
+    default=None,
+    help="Comma-separated GitHub usernames for review signals (also TEAM_USERNAMES env).",
+)
+@click.option(
+    "--verbose",
+    is_flag=True,
+    default=False,
+    help="Show detailed debug output during scanning.",
+)
+def github_scan(
+    config_path: str,
+    period: str | None,
+    usernames: str | None,
+    verbose: bool,
+) -> None:
+    """Scan GitHub repositories for AI adoption signals."""
+    from ai_fluency_collector.github_client import (
+        GitHubAuthError,
+        GitHubClient,
+        GitHubServerError,
+    )
+    from ai_fluency_collector.github_scoring import (
+        GITHUB_REVIEW_SKILL_MAPPINGS,
+        calculate_github_review_scores,
+    )
+    from ai_fluency_collector.scanners.github_artifact_scanner import GitHubArtifactScanner
+    from ai_fluency_collector.scanners.github_review_scanner import GitHubReviewScanner
+
+    # 1. Load config
+    try:
+        team = load_config(config_path)
+    except (FileNotFoundError, ValueError) as e:
+        raise click.ClickException(str(e)) from e
+
+    if not team.github_repos:
+        raise click.ClickException(
+            "No GitHub repos configured. Add github_repos to your config file."
+        )
+
+    # 2. Resolve usernames (CLI → env → config members)
+    if usernames:
+        effective_members = [u.strip() for u in usernames.split(",") if u.strip()]
+    else:
+        env_usernames = os.environ.get("TEAM_USERNAMES", "")
+        effective_members = (
+            [u.strip() for u in env_usernames.split(",") if u.strip()]
+            if env_usernames
+            else team.members
+        )
+
+    # 3. Validate period
+    if period is None:
+        period = current_iso_week()
+    else:
+        validate_period(period)
+
+    # 4. Check GITHUB_TOKEN
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise click.ClickException(
+            "GITHUB_TOKEN environment variable is not set. "
+            "Export a token with repo and read:user scopes."
+        )
+
+    # 5. Validate token
+    client = GitHubClient(token)
+    try:
+        client.validate_token()
+    except (GitHubAuthError, GitHubServerError) as e:
+        raise click.ClickException(str(e)) from e
+
+    # 6. Print startup banner
+    output_file = f"{team.code}-{period}.json"
+    click.echo(AFC_BANNER)
+    click.echo("  GitHub:   api.github.com")
+    click.echo(f"  Team:     {team.name}")
+    click.echo(f"  Repos:    {len(team.github_repos)}")
+    click.echo(f"  Members:  {len(effective_members)}")
+    click.echo(f"  Period:   {period}")
+    click.echo(f"  Output:   {output_file}")
+    click.echo()
+
+    # 7. Scan repo artifacts
+    click.echo("Scanning GitHub repo artifacts...")
+    artifact_scanner = GitHubArtifactScanner(client)
+    artifact_signals = artifact_scanner.scan_repos(team.github_repos)
+    for repo in team.github_repos:
+        click.echo(f"  {repo}: scanned")
+    click.echo(f"  → {len(artifact_signals)} artifact signals detected")
+    click.echo()
+
+    # 8. Scan PR review behavioral signals
+    review_signals: list[dict] = []
+    if effective_members:
+        click.echo("Scanning GitHub PR review patterns...")
+        review_scanner = GitHubReviewScanner(client)
+        review_metrics = review_scanner.scan(effective_members, period)
+        review_signals = calculate_github_review_scores(
+            review_metrics, GITHUB_REVIEW_SKILL_MAPPINGS
+        )
+        click.echo(f"  {review_metrics.total_authored_prs} authored PRs analyzed")
+        click.echo(f"  → {len(review_signals)} review signals detected")
+        click.echo()
+    else:
+        click.echo("Skipping PR review scan (no usernames provided).")
+        click.echo()
+
+    # 9. Build and write output JSON
+    sources = []
+    if artifact_signals:
+        sources.append({"source_id": "github-repo-artifacts", "signals": artifact_signals})
+    if review_signals:
+        sources.append({"source_id": "github-review-signals", "signals": review_signals})
+
+    data = {
+        "team_code": team.code,
+        "survey_period": period,
+        "sources": sources,
+    }
+    output_path = write_output(data, team.code, period)
+
+    # 10. Summary
+    total_signals = len(artifact_signals) + len(review_signals)
+    click.echo("Summary")
+    click.echo(f"  File:    {output_path}")
+    click.echo(f"  Sources: {len(sources)}")
+    click.echo(f"  Signals: {total_signals}")
+    click.echo(f"  Team:    {team.code}")
+
+
 @main.command()
 def init() -> None:
     """Interactive setup wizard to create a team config YAML file."""
