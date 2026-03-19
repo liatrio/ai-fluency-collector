@@ -19,7 +19,20 @@ It produces a single JSON file with weighted skill scores that can be imported d
 
 ## Installation
 
-### Recommended: pipx (isolated install)
+### Recommended: pipx (isolated install, no venv needed)
+
+First, install pipx if you don't have it:
+
+```bash
+# macOS
+brew install pipx
+
+# Linux / other
+pip3 install --user pipx
+pipx ensurepath
+```
+
+Then install the collector:
 
 ```bash
 git clone git@github.com:liatrio/ai-fluency-collector.git
@@ -27,7 +40,7 @@ cd ai-fluency-collector
 pipx install .
 ```
 
-This installs the `ai-fluency-collector` command globally in an isolated environment, so it won't conflict with other Python packages.
+This installs `afc` (and `ai-fluency-collector`) globally in an isolated environment — no venv activation needed.
 
 ### Alternative: pip with venv
 
