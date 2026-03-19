@@ -1,16 +1,19 @@
 name: Project Board Automation
 
-# Keeps the AI Fluency Kanban (project #180) in sync with PRs.
+# Keeps the AI Fluency Kanban (project #180) in sync with issues and PRs.
 #
 # Triggers:
-#   - PR opened/reopened → linked issues move to "In Review"
-#   - PR merged          → linked issues move to "Done" and are closed
+#   - Issue opened        → added to the board in "Backlog"
+#   - PR opened/reopened  → linked issues move to "In Review"
+#   - PR merged           → linked issues move to "Done" and are closed
 #
 # Requires a repo secret named PROJECT_TOKEN containing a classic PAT
 # with scopes: repo, project
 # (GITHUB_TOKEN cannot write to org-level projects)
 
 on:
+  issues:
+    types: [opened]
   pull_request:
     branches: [main]
     types: [opened, reopened, closed]
@@ -19,6 +22,7 @@ permissions:
   contents: read
   issues: write
   pull-requests: read
+  repository-projects: write
 
 env:
   PROJECT_NUMBER: 180
@@ -28,6 +32,27 @@ env:
   STATUS_DONE: 98236657
 
 jobs:
+  # ── Issue opened → Backlog ──────────────────────────────────────
+  add-to-board:
+    name: Add new issue → Backlog
+    if: github.event_name == 'issues' && github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add issue to project board
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::PROJECT_TOKEN secret is not configured."
+            exit 1
+          fi
+
+          gh project item-add ${{ env.PROJECT_NUMBER }} \
+            --owner "${{ env.PROJECT_OWNER }}" \
+            --url "${{ github.event.issue.html_url }}"
+
+          echo "Issue #${{ github.event.issue.number }} added to project board."
+
   # ── PR opened → In Review ───────────────────────────────────────
   move-to-in-review:
     name: Move linked issues → In Review
