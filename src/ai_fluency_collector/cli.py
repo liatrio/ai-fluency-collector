@@ -19,11 +19,14 @@ from ai_fluency_collector.output import build_output, write_output
 from ai_fluency_collector.scanners.artifact_scanner import ARTIFACT_DEFINITIONS, ArtifactScanner
 from ai_fluency_collector.scanners.ci_scanner import CI_PATTERN_IDS, CIScanner
 from ai_fluency_collector.scanners.member_scanner import MemberScanner
+from ai_fluency_collector.scanners.review_scanner import ReviewScanner
 from ai_fluency_collector.scoring import (
     ARTIFACT_SKILL_MAPPINGS,
     CI_SKILL_MAPPINGS,
     MEMBER_SKILL_MAPPINGS,
+    REVIEW_SKILL_MAPPINGS,
     calculate_member_scores,
+    calculate_review_scores,
     calculate_scores,
 )
 
@@ -94,6 +97,11 @@ def main():
     help="Test the connection, list accessible projects, and exit without scanning.",
 )
 @click.option(
+    "--usernames",
+    default=None,
+    help="Comma-separated GitLab usernames (overrides config members; also TEAM_USERNAMES env).",
+)
+@click.option(
     "--verbose",
     is_flag=True,
     default=False,
@@ -104,6 +112,7 @@ def scan(
     period: str | None,
     gitlab_url: str | None,
     validate: bool,
+    usernames: str | None,
     verbose: bool,
 ) -> None:
     """Scan GitLab repositories for AI adoption signals."""
@@ -115,34 +124,50 @@ def scan(
     except ValueError as e:
         raise click.ClickException(str(e)) from e
 
-    # 2. Resolve gitlab_url: CLI flag overrides config value
+    # 2. Resolve effective team members (CLI flag → env var → config)
+    if usernames:
+        effective_members = [u.strip() for u in usernames.split(",") if u.strip()]
+    else:
+        env_usernames = os.environ.get("TEAM_USERNAMES", "")
+        if env_usernames:
+            effective_members = [u.strip() for u in env_usernames.split(",") if u.strip()]
+        else:
+            effective_members = team.members
+
+    if not effective_members:
+        raise click.ClickException(
+            "No team members specified. "
+            "Provide --usernames flag, TEAM_USERNAMES env var, or members in config file."
+        )
+
+    # 4. Resolve gitlab_url: CLI flag overrides config value
     effective_gitlab_url = gitlab_url if gitlab_url is not None else team.gitlab_url
     # Auto-add https:// if missing
     if not effective_gitlab_url.startswith(("http://", "https://")):
         effective_gitlab_url = f"https://{effective_gitlab_url}"
     effective_gitlab_url = effective_gitlab_url.rstrip("/")
 
-    # 3. Validate period
+    # 5. Validate period
     if period is None:
         period = current_iso_week()
     else:
         validate_period(period)
 
-    # 4. Check GITLAB_TOKEN
+    # 6. Check GITLAB_TOKEN
     token = os.environ.get("GITLAB_TOKEN")
     if not token:
         raise click.ClickException(
             "GITLAB_TOKEN environment variable is not set. Export a token with read_api scope."
         )
 
-    # 5. Validate token against GitLab API
+    # 7. Validate token against GitLab API
     client = GitLabClient(token, base_url=effective_gitlab_url)
     try:
         client.validate_token()
     except (GitLabAuthError, GitLabServerError) as e:
         raise click.ClickException(str(e)) from e
 
-    # 6. --validate mode: test connection, list projects, and exit
+    # 8. --validate mode: test connection, list projects, and exit
     if validate:
         click.echo(AFC_BANNER)
         click.echo("Validation Mode")
@@ -161,18 +186,18 @@ def scan(
         click.echo("Validation complete.")
         return
 
-    # 7. Print startup banner
+    # 9. Print startup banner
     output_file = f"{team.code}-{period}.json"
     click.echo(AFC_BANNER)
     click.echo(f"  GitLab:   {effective_gitlab_url}")
     click.echo(f"  Team:     {team.name}")
-    click.echo(f"  Members:  {len(team.members)}")
+    click.echo(f"  Members:  {len(effective_members)}")
     click.echo(f"  Projects: {len(team.projects)}")
     click.echo(f"  Period:   {period}")
     click.echo(f"  Output:   {output_file}")
     click.echo()
 
-    # 8. Scan for repo artifacts
+    # 10. Scan for repo artifacts
     click.echo("Scanning for repo artifacts...")
     scanner = ArtifactScanner(client)
     all_artifact_results: list[dict[str, bool]] = []
@@ -213,12 +238,12 @@ def scan(
         else:
             click.echo(f"  {project}: no artifacts found")
 
-    # 7. Calculate artifact scores
+    # 11. Calculate artifact scores
     artifact_signals = calculate_scores(all_artifact_results, ARTIFACT_SKILL_MAPPINGS)
     click.echo(f"  → {len(artifact_signals)} artifact signals detected")
     click.echo()
 
-    # 8. Scan for CI config patterns
+    # 12. Scan for CI config patterns
     click.echo("Scanning CI configurations...")
     ci_scanner = CIScanner(client, ci_signals=team.ci_signals)
     all_ci_results: list[dict[str, bool]] = []
@@ -236,42 +261,55 @@ def scan(
         else:
             click.echo(f"  {project}: no CI patterns found")
 
-    # 9. Calculate CI scores
+    # 13. Calculate CI scores
     ci_signals = calculate_scores(all_ci_results, CI_SKILL_MAPPINGS)
     click.echo(f"  → {len(ci_signals)} CI signals detected")
     click.echo()
 
-    # 10. Scan member activity
+    # 14. Scan member activity
     click.echo("Scanning member activity...")
     member_scanner = MemberScanner(client, team.projects)
     try:
-        member_results = member_scanner.scan_all_members(team.members)
+        member_results = member_scanner.scan_all_members(effective_members)
     except (GitLabUserNotFoundError, GitLabServerError) as e:
         raise click.ClickException(str(e)) from e
 
-    for result in member_results:
-        if result.ai_coauthor_counts:
-            patterns = ", ".join(f"{k}: {v}" for k, v in result.ai_coauthor_counts.items())
-            click.echo(
-                f"  {result.username}: {result.repos_discovered} repos discovered, {patterns}"
-            )
-        else:
-            click.echo(
-                f"  {result.username}: {result.repos_discovered} repos discovered, "
-                f"no AI co-author commits"
-            )
+    total_repos = sum(r.repos_discovered for r in member_results)
+    members_with_ai = sum(1 for r in member_results if r.ai_coauthor_counts)
+    click.echo(f"  {total_repos} repos discovered across team")
+    click.echo(f"  {members_with_ai}/{len(effective_members)} members with AI co-author commits")
+    if verbose:
+        pattern_totals: dict[str, int] = {}
+        for result in member_results:
+            for k, v in result.ai_coauthor_counts.items():
+                pattern_totals[k] = pattern_totals.get(k, 0) + v
+        for pattern, total in pattern_totals.items():
+            click.echo(f"    {pattern}: {total} commits")
 
-    # 11. Calculate member activity scores
+    # 15. Calculate member activity scores
     member_signals = calculate_member_scores(member_results, MEMBER_SKILL_MAPPINGS)
     click.echo(f"  → {len(member_signals)} member activity signals detected")
     click.echo()
 
-    # 12. Build and write output JSON
-    data = build_output(team.code, period, artifact_signals, ci_signals, member_signals)
+    # 16. Scan MR review behavioral patterns
+    click.echo("Scanning MR review patterns...")
+    review_scanner = ReviewScanner(client)
+    review_metrics = review_scanner.scan(effective_members, period)
+    review_signals = calculate_review_scores(review_metrics, REVIEW_SKILL_MAPPINGS)
+    click.echo(f"  {review_metrics.total_authored_mrs} authored MRs analyzed")
+    click.echo(f"  → {len(review_signals)} review signals detected")
+    click.echo()
+
+    # 17. Build and write output JSON
+    data = build_output(
+        team.code, period, artifact_signals, ci_signals, member_signals, review_signals
+    )
     output_path = write_output(data, team.code, period)
 
-    # 13. Print summary
-    total_signals = len(artifact_signals) + len(ci_signals) + len(member_signals)
+    # 18. Print summary
+    total_signals = (
+        len(artifact_signals) + len(ci_signals) + len(member_signals) + len(review_signals)
+    )
     num_sources = len(data["sources"])
     click.echo("Summary")
     click.echo(f"  File:    {output_path}")

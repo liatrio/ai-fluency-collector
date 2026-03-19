@@ -97,20 +97,22 @@ def test_missing_team_name(tmp_path):
         load_config(str(path))
 
 
-def test_missing_team_members(tmp_path):
+def test_missing_team_members_is_allowed(tmp_path):
+    """members field is optional; omitting it yields an empty list."""
     config = {"team": {"name": "T", "code": "t", "projects": ["a/b"]}}
     path = tmp_path / "no-members.yaml"
     path.write_text(yaml.dump(config))
-    with pytest.raises(ValueError, match="team.members"):
-        load_config(str(path))
+    result = load_config(str(path))
+    assert result.members == []
 
 
-def test_empty_members_list(tmp_path):
+def test_empty_members_list_is_allowed(tmp_path):
+    """An empty members list is valid; username source is resolved in cli.py."""
     config = {"team": {"name": "T", "code": "t", "members": [], "projects": ["a/b"]}}
     path = tmp_path / "empty-members.yaml"
     path.write_text(yaml.dump(config))
-    with pytest.raises(ValueError, match="non-empty list of GitLab usernames"):
-        load_config(str(path))
+    result = load_config(str(path))
+    assert result.members == []
 
 
 def test_missing_team_projects(tmp_path):

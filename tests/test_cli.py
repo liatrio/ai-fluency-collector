@@ -147,7 +147,9 @@ def test_member_scanning_in_output(mock_client_cls, mock_member_cls, tmp_path, m
     result = runner.invoke(main, ["scan", "--config", config_path, "--period", "2026-W12"])
     assert result.exit_code == 0
     assert "Scanning member activity" in result.output
-    assert "alice.smith" in result.output
+    # Individual usernames must not appear in output (anonymity requirement)
+    assert "alice.smith" not in result.output
+    assert "repos discovered across team" in result.output
 
 
 @patch("ai_fluency_collector.cli.GitLabClient")
