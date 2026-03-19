@@ -422,28 +422,42 @@ def init() -> None:
             click.echo(f"    {i}. [{item['type']}] {item['value']}  ({item['project']})")
         click.echo()
 
+        # Pre-scan for suggestions
+        ai_suggested = _suggest_items(all_ci_items, "ai")
+        sec_suggested = _suggest_items(all_ci_items, "security")
+        deploy_suggested = _suggest_items(all_ci_items, "deployment")
+
         # Tag AI-related items
+        ai_default = ",".join(str(i) for i in ai_suggested) if ai_suggested else "skip"
+        if ai_suggested:
+            click.echo(f"  Suggested AI-related: {ai_default}")
         ai_input = click.prompt(
             "  Which are AI-related? (comma-separated numbers, or 'skip')",
-            default="skip",
+            default=ai_default,
         )
         ai_items = _parse_selection(ai_input, all_ci_items)
         if ai_items:
             ci_signals_config["ai-code-review"] = ai_items
 
         # Tag security-related items
+        sec_default = ",".join(str(i) for i in sec_suggested) if sec_suggested else "skip"
+        if sec_suggested:
+            click.echo(f"  Suggested security-related: {sec_default}")
         sec_input = click.prompt(
             "  Which are security-related? (comma-separated numbers, or 'skip')",
-            default="skip",
+            default=sec_default,
         )
         sec_items = _parse_selection(sec_input, all_ci_items)
         if sec_items:
             ci_signals_config["sast-dast"] = sec_items
 
         # Tag deployment gates
+        deploy_default = ",".join(str(i) for i in deploy_suggested) if deploy_suggested else "skip"
+        if deploy_suggested:
+            click.echo(f"  Suggested deployment gates: {deploy_default}")
         deploy_input = click.prompt(
             "  Which are deployment gates? (comma-separated numbers, or 'skip')",
-            default="skip",
+            default=deploy_default,
         )
         deploy_items = _parse_selection(deploy_input, all_ci_items)
         if deploy_items:
@@ -535,6 +549,37 @@ def _collect_ci_items(
     for key in ci_config:
         if key not in skip_keys:
             items.append({"type": "job", "value": key, "project": project})
+
+
+def _suggest_items(items: list[dict[str, str]], category: str) -> list[int]:
+    """Pre-scan CI items and suggest indices (1-based) matching a category.
+
+    Categories: "ai", "security", "deployment"
+    """
+    import re as _re
+
+    patterns: dict[str, list[_re.Pattern]] = {
+        "ai": [
+            _re.compile(r"duo|ai.?review|codereview|coderabbit|copilot|claude", _re.IGNORECASE),
+            _re.compile(r"ai.?test|test.?gen|diffblue|codium", _re.IGNORECASE),
+        ],
+        "security": [
+            _re.compile(r"sast|dast|security|secret.?detect|dependency.?scan", _re.IGNORECASE),
+        ],
+        "deployment": [
+            _re.compile(r"deploy|release|rollout", _re.IGNORECASE),
+        ],
+    }
+
+    category_patterns = patterns.get(category, [])
+    suggested: list[int] = []
+    for i, item in enumerate(items, 1):
+        value = item["value"]
+        for pattern in category_patterns:
+            if pattern.search(value):
+                suggested.append(i)
+                break
+    return suggested
 
 
 def _parse_selection(input_str: str, items: list[dict[str, str]]) -> list[str]:
