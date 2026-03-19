@@ -193,14 +193,19 @@ def scan(
     effective_gitlab_url = effective_gitlab_url.rstrip("/")
 
     # 5. Resolve periods to scan
+    # Precedence: CLI --from/--to → config scan_from/scan_to → CLI --period → current week
     if (from_date is None) != (to_date is None):
         raise click.ClickException("--from and --to must be used together.")
-    if from_date and period:
+
+    effective_from = from_date or team.scan_from
+    effective_to = to_date or team.scan_to
+
+    if effective_from and period:
         raise click.ClickException("--from/--to and --period are mutually exclusive.")
 
-    if from_date:
+    if effective_from:
         try:
-            periods = _dates_to_iso_weeks(from_date, to_date)
+            periods = _dates_to_iso_weeks(effective_from, effective_to)
         except click.BadParameter as e:
             raise click.ClickException(str(e)) from e
     else:

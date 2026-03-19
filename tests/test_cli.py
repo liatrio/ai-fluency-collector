@@ -256,6 +256,71 @@ def test_from_to_and_period_mutually_exclusive(tmp_path, monkeypatch):
     assert "mutually exclusive" in result.output
 
 
+@patch("ai_fluency_collector.cli.MemberScanner")
+@patch("ai_fluency_collector.cli.GitLabClient")
+def test_scan_from_to_in_config_used_as_fallback(
+    mock_client_cls, mock_member_cls, tmp_path, monkeypatch
+):
+    """scan_from/scan_to in config file triggers multi-week scan without CLI flags."""
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    _setup_mock_client(mock_client_cls)
+    mock_member_cls.return_value.scan_all_members.return_value = [
+        MemberResult(username="alice.smith")
+    ]
+    config = {
+        "team": {
+            "name": "Test Team",
+            "code": "test-team",
+            "members": ["alice.smith"],
+            "projects": ["group/project-one"],
+            "scan_from": "2026-03-09",
+            "scan_to": "2026-03-22",
+        }
+    }
+    path = tmp_path / "team.yaml"
+    path.write_text(yaml.dump(config))
+    runner = CliRunner()
+    result = runner.invoke(main, ["scan", "--config", str(path)])
+    assert result.exit_code == 0, result.output
+    assert "2026-W11" in result.output
+    assert "2026-W12" in result.output
+    assert "2 weeks" in result.output
+
+
+@patch("ai_fluency_collector.cli.MemberScanner")
+@patch("ai_fluency_collector.cli.GitLabClient")
+def test_cli_from_to_overrides_config_dates(
+    mock_client_cls, mock_member_cls, tmp_path, monkeypatch
+):
+    """CLI --from/--to takes precedence over config scan_from/scan_to."""
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    _setup_mock_client(mock_client_cls)
+    mock_member_cls.return_value.scan_all_members.return_value = [
+        MemberResult(username="alice.smith")
+    ]
+    config = {
+        "team": {
+            "name": "Test Team",
+            "code": "test-team",
+            "members": ["alice.smith"],
+            "projects": ["group/project-one"],
+            "scan_from": "2026-01-01",
+            "scan_to": "2026-01-07",
+        }
+    }
+    path = tmp_path / "team.yaml"
+    path.write_text(yaml.dump(config))
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["scan", "--config", str(path), "--from", "2026-03-16", "--to", "2026-03-22"],
+    )
+    assert result.exit_code == 0, result.output
+    # CLI dates should win — W12 not W01
+    assert "2026-W12" in result.output
+    assert "2026-W01" not in result.output
+
+
 def test_from_after_to_errors(tmp_path, monkeypatch):
     """--from date later than --to is rejected."""
     monkeypatch.setenv("GITLAB_TOKEN", "test-token")

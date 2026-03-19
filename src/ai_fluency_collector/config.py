@@ -14,6 +14,8 @@ class TeamConfig:
     projects: list[str] = field(default_factory=list)
     gitlab_url: str = "https://gitlab.com"
     ci_signals: dict[str, list[str]] = field(default_factory=dict)
+    scan_from: str | None = None
+    scan_to: str | None = None
 
 
 def load_config(path: str) -> TeamConfig:
@@ -75,6 +77,22 @@ def load_config(path: str) -> TeamConfig:
                 raise ValueError(f"team.ci_signals.{key} must be a list of strings")
             ci_signals[key] = [str(v) for v in val]
 
+    _DATE_RE = r"^\d{4}-\d{2}-\d{2}$"
+    import re
+
+    scan_from = team.get("scan_from")
+    scan_to = team.get("scan_to")
+    if scan_from is not None:
+        scan_from = str(scan_from)
+        if not re.match(_DATE_RE, scan_from):
+            raise ValueError("team.scan_from must be in YYYY-MM-DD format")
+    if scan_to is not None:
+        scan_to = str(scan_to)
+        if not re.match(_DATE_RE, scan_to):
+            raise ValueError("team.scan_to must be in YYYY-MM-DD format")
+    if (scan_from is None) != (scan_to is None):
+        raise ValueError("team.scan_from and team.scan_to must both be set or both be absent")
+
     return TeamConfig(
         name=team["name"],
         code=team["code"],
@@ -82,4 +100,6 @@ def load_config(path: str) -> TeamConfig:
         projects=projects,
         gitlab_url=gitlab_url,
         ci_signals=ci_signals,
+        scan_from=scan_from,
+        scan_to=scan_to,
     )
