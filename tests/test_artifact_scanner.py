@@ -258,9 +258,18 @@ def test_project_access_error_403():
 
 
 @responses.activate
-def test_no_branches_falls_back_to_head():
-    """When no active branches found, falls back to scanning HEAD."""
-    _register_branches([])
+def test_no_active_branches_falls_back_to_head():
+    """When branches exist but none are active, falls back to scanning HEAD."""
+    # Return branches with old dates
+    _register_branches(
+        [
+            {
+                "name": "main",
+                "default": True,
+                "commit": {"committed_date": "2020-01-01T00:00:00.000+00:00"},
+            }
+        ]
+    )
     _register_all_artifacts_missing()
 
     client = GitLabClient("test-token")
@@ -269,3 +278,14 @@ def test_no_branches_falls_back_to_head():
 
     for weight in result.values():
         assert weight == 0.0
+
+
+@responses.activate
+def test_project_not_found_raises_error():
+    """404 on branches raises GitLabAccessError with helpful message."""
+    responses.add(responses.GET, _branches_url(), status=404)
+
+    client = GitLabClient("test-token")
+    scanner = ArtifactScanner(client)
+    with pytest.raises(GitLabAccessError, match="not found"):
+        scanner.scan_project(PROJECT)

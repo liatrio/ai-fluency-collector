@@ -129,6 +129,7 @@ class GitLabClient:
 
         Returns list of branch dicts with 'name', 'default', and
         'commit.committed_date' fields.
+        Raises GitLabAccessError if the project is not found.
         """
         encoded_project = self._encode_project(project_path)
         url = self._api_url(f"/projects/{encoded_project}/repository/branches")
@@ -137,7 +138,11 @@ class GitLabClient:
         while True:
             resp = self.session.get(url, params={"per_page": 100, "page": page})
             if resp.status_code == 404:
-                return []
+                raise GitLabAccessError(
+                    f"Project '{project_path}' not found. "
+                    "Check the project path — it should match the URL after your GitLab domain "
+                    "(e.g., 'eng/genomics/vms' not 'natera.com/eng/genomics/vms')."
+                )
             if resp.status_code == 401:
                 raise GitLabAuthError(
                     "GitLab authentication failed. "
