@@ -348,3 +348,68 @@ def test_ci_pattern_on_feature_branch_higher_weight():
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
     assert result["sast-dast"] == FEATURE_BRANCH_WEIGHT
+
+
+@responses.activate
+def test_local_include_scanned():
+    """Patterns in locally included CI files are detected."""
+    _register_branches(SINGLE_DEFAULT_BRANCH)
+
+    # Root CI file includes a local file
+    root_ci = yaml.dump(
+        {
+            "include": [{"local": ".gitlab/deploy/.gitlab-ci.yml"}],
+            "stages": ["build", "deploy"],
+        }
+    )
+    _register_ci_content(root_ci)
+
+    # The local include has deployment with environment
+    deploy_ci = yaml.dump(
+        {
+            "deploy-prod": {
+                "stage": "deploy",
+                "script": ["deploy.sh"],
+                "environment": {"name": "production"},
+                "rules": [{"if": "$CI_COMMIT_BRANCH == 'master'"}],
+            },
+        }
+    )
+    encoded_file = quote(".gitlab/deploy/.gitlab-ci.yml", safe="")
+    responses.add(
+        responses.GET,
+        f"{BASE}/projects/{ENCODED_PROJECT}/repository/files/{encoded_file}/raw",
+        body=deploy_ci,
+        status=200,
+    )
+
+    client = GitLabClient("test-token")
+    scanner = CIScanner(client)
+    result = scanner.scan_project(PROJECT)
+    assert result["deployment-gates"] == DEFAULT_BRANCH_WEIGHT
+
+
+@responses.activate
+def test_local_include_missing_file_skipped():
+    """Missing local include file is skipped gracefully."""
+    _register_branches(SINGLE_DEFAULT_BRANCH)
+
+    root_ci = yaml.dump(
+        {
+            "include": [{"local": ".gitlab/nonexistent.yml"}],
+        }
+    )
+    _register_ci_content(root_ci)
+
+    encoded_file = quote(".gitlab/nonexistent.yml", safe="")
+    responses.add(
+        responses.GET,
+        f"{BASE}/projects/{ENCODED_PROJECT}/repository/files/{encoded_file}/raw",
+        status=404,
+    )
+
+    client = GitLabClient("test-token")
+    scanner = CIScanner(client)
+    result = scanner.scan_project(PROJECT)
+    for pid in CI_PATTERN_IDS:
+        assert result[pid] == 0.0

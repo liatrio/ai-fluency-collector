@@ -42,19 +42,22 @@ DEPENDENCY_PATTERNS = re.compile(r"dependency.?scan", re.IGNORECASE)
 DEPLOY_STAGE_PATTERNS = re.compile(r"deploy", re.IGNORECASE)
 
 
-def _extract_include_templates(ci_config: dict) -> list[str]:
-    """Extract template paths from GitLab CI include directives.
+def _extract_includes(ci_config: dict) -> tuple[list[str], list[str]]:
+    """Extract template and local paths from GitLab CI include directives.
+
+    Returns (templates, local_paths).
 
     Handles all include formats:
     - String shorthand: include: 'template.yml'
-    - Single dict: include: {template: 'path'}
+    - Single dict: include: {template: 'path', local: 'path'}
     - List of strings or dicts
     """
     includes = ci_config.get("include")
     if includes is None:
-        return []
+        return [], []
 
     templates: list[str] = []
+    local_paths: list[str] = []
 
     if isinstance(includes, str):
         templates.append(includes)
@@ -62,7 +65,7 @@ def _extract_include_templates(ci_config: dict) -> list[str]:
         if "template" in includes:
             templates.append(includes["template"])
         if "local" in includes:
-            templates.append(includes["local"])
+            local_paths.append(includes["local"])
     elif isinstance(includes, list):
         for item in includes:
             if isinstance(item, str):
@@ -71,9 +74,9 @@ def _extract_include_templates(ci_config: dict) -> list[str]:
                 if "template" in item:
                     templates.append(item["template"])
                 if "local" in item:
-                    templates.append(item["local"])
+                    local_paths.append(item["local"])
 
-    return templates
+    return templates, local_paths
 
 
 def _has_template_match(templates: list[str], known_templates: list[str]) -> bool:
@@ -152,6 +155,28 @@ def _check_deployment_gates(ci_config: dict) -> bool:
     return False
 
 
+def _analyze_ci_config(ci_config: dict, templates: list[str]) -> dict[str, bool]:
+    """Analyze a parsed CI config dict for known patterns."""
+    return {
+        "sast-dast": (
+            _has_template_match(templates, SAST_TEMPLATES)
+            or _search_jobs(ci_config, SAST_DAST_PATTERNS)
+        ),
+        "secret-detection": (
+            _has_template_match(templates, SECRET_TEMPLATES)
+            or _search_jobs(ci_config, SECRET_PATTERNS)
+        ),
+        "ai-code-review": _search_jobs(ci_config, AI_REVIEW_PATTERNS),
+        "ai-test-generation": _search_jobs(ci_config, AI_TEST_PATTERNS),
+        "dependency-scanning": (
+            _has_template_match(templates, DEPENDENCY_TEMPLATES)
+            or _search_jobs(ci_config, DEPENDENCY_PATTERNS)
+        ),
+        "code-coverage": _check_coverage(ci_config),
+        "deployment-gates": _check_deployment_gates(ci_config),
+    }
+
+
 class CIScanner:
     """Scans GitLab projects for CI pipeline patterns in .gitlab-ci.yml."""
 
@@ -159,40 +184,51 @@ class CIScanner:
         self.client = client
         self.active_days = active_days
 
+    def _parse_yaml(self, content: str) -> dict | None:
+        """Parse YAML content, returning None on failure."""
+        try:
+            config = yaml.safe_load(content)
+        except yaml.YAMLError:
+            return None
+        if not isinstance(config, dict):
+            return None
+        return config
+
     def _scan_branch(self, project_path: str, ref: str) -> dict[str, bool]:
-        """Scan a single branch's .gitlab-ci.yml for CI patterns."""
+        """Scan a single branch's .gitlab-ci.yml and local includes for CI patterns."""
         content = self.client.get_file_content(project_path, ".gitlab-ci.yml", ref=ref)
         if content is None:
             return {pid: False for pid in CI_PATTERN_IDS}
 
-        try:
-            ci_config = yaml.safe_load(content)
-        except yaml.YAMLError:
+        ci_config = self._parse_yaml(content)
+        if ci_config is None:
             return {pid: False for pid in CI_PATTERN_IDS}
 
-        if not isinstance(ci_config, dict):
-            return {pid: False for pid in CI_PATTERN_IDS}
+        templates, local_paths = _extract_includes(ci_config)
 
-        templates = _extract_include_templates(ci_config)
+        # Start with analysis of the root CI file
+        results = _analyze_ci_config(ci_config, templates)
 
-        return {
-            "sast-dast": (
-                _has_template_match(templates, SAST_TEMPLATES)
-                or _search_jobs(ci_config, SAST_DAST_PATTERNS)
-            ),
-            "secret-detection": (
-                _has_template_match(templates, SECRET_TEMPLATES)
-                or _search_jobs(ci_config, SECRET_PATTERNS)
-            ),
-            "ai-code-review": _search_jobs(ci_config, AI_REVIEW_PATTERNS),
-            "ai-test-generation": _search_jobs(ci_config, AI_TEST_PATTERNS),
-            "dependency-scanning": (
-                _has_template_match(templates, DEPENDENCY_TEMPLATES)
-                or _search_jobs(ci_config, DEPENDENCY_PATTERNS)
-            ),
-            "code-coverage": _check_coverage(ci_config),
-            "deployment-gates": _check_deployment_gates(ci_config),
-        }
+        # Fetch and scan local includes
+        for local_path in local_paths:
+            # Strip leading slash if present
+            clean_path = local_path.lstrip("/")
+            local_content = self.client.get_file_content(project_path, clean_path, ref=ref)
+            if local_content is None:
+                continue
+            local_config = self._parse_yaml(local_content)
+            if local_config is None:
+                continue
+
+            local_templates, _ = _extract_includes(local_config)
+            local_results = _analyze_ci_config(local_config, local_templates)
+
+            # Merge: if any included file has a pattern, mark it as found
+            for pid, found in local_results.items():
+                if found:
+                    results[pid] = True
+
+        return results
 
     def scan_project(self, project_path: str) -> dict[str, float]:
         """Scan a project's .gitlab-ci.yml across all active branches.
