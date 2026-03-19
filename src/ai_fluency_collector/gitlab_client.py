@@ -233,6 +233,111 @@ class GitLabClient:
             page += 1
         return results
 
+    def search_merge_requests(
+        self,
+        author_username: str | None = None,
+        reviewer_username: str | None = None,
+        state: str = "merged",
+        updated_after: str | None = None,
+        updated_before: str | None = None,
+    ) -> list[dict]:
+        """Search merge requests globally with scope=all.
+
+        Args:
+            author_username: Filter by MR author username.
+            reviewer_username: Filter by reviewer username (GitLab 13.7+).
+            state: MR state ('merged', 'opened', 'closed', 'all').
+            updated_after: ISO date string to filter MRs updated after.
+            updated_before: ISO date string to filter MRs updated before.
+        """
+        url = self._api_url("/merge_requests")
+        params: dict = {"scope": "all", "state": state, "per_page": 100}
+        if author_username:
+            params["author_username"] = author_username
+        if reviewer_username:
+            params["reviewer_username"] = reviewer_username
+        if updated_after:
+            params["updated_after"] = updated_after
+        if updated_before:
+            params["updated_before"] = updated_before
+        results: list[dict] = []
+        page = 1
+        while True:
+            params["page"] = page
+            resp = self.session.get(url, params=params)
+            _check_server_error(resp, "searching merge requests")
+            resp.raise_for_status()
+            items = resp.json()
+            if not items:
+                break
+            results.extend(items)
+            page += 1
+        return results
+
+    def get_mr_notes(self, project_id: int, mr_iid: int) -> list[dict]:
+        """Get all notes for a merge request. Caller filters system notes."""
+        url = self._api_url(f"/projects/{project_id}/merge_requests/{mr_iid}/notes")
+        results: list[dict] = []
+        page = 1
+        while True:
+            resp = self.session.get(url, params={"per_page": 100, "page": page})
+            _check_server_error(resp, f"fetching notes for MR !{mr_iid}")
+            if resp.status_code == 404:
+                return []
+            resp.raise_for_status()
+            items = resp.json()
+            if not items:
+                break
+            results.extend(items)
+            page += 1
+        return results
+
+    def get_mr_discussions(self, project_id: int, mr_iid: int) -> list[dict]:
+        """Get all discussion threads for a merge request."""
+        url = self._api_url(f"/projects/{project_id}/merge_requests/{mr_iid}/discussions")
+        results: list[dict] = []
+        page = 1
+        while True:
+            resp = self.session.get(url, params={"per_page": 100, "page": page})
+            _check_server_error(resp, f"fetching discussions for MR !{mr_iid}")
+            if resp.status_code == 404:
+                return []
+            resp.raise_for_status()
+            items = resp.json()
+            if not items:
+                break
+            results.extend(items)
+            page += 1
+        return results
+
+    def get_mr_approvals(self, project_id: int, mr_iid: int) -> dict:
+        """Get approval state for a merge request."""
+        url = self._api_url(f"/projects/{project_id}/merge_requests/{mr_iid}/approvals")
+        resp = self.session.get(url)
+        _check_server_error(resp, f"fetching approvals for MR !{mr_iid}")
+        if resp.status_code == 404:
+            return {}
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_mr_diffs(self, project_id: int, mr_iid: int) -> list[dict]:
+        """Get changed files for a merge request."""
+        url = self._api_url(f"/projects/{project_id}/merge_requests/{mr_iid}/diffs")
+        results: list[dict] = []
+        page = 1
+        while True:
+            resp = self.session.get(url, params={"per_page": 100, "page": page})
+            _check_server_error(resp, f"fetching diffs for MR !{mr_iid}")
+            if resp.status_code == 404:
+                return []
+            resp.raise_for_status()
+            items = resp.json()
+            if not items:
+                break
+            results.extend(items)
+            page += 1
+        return results
+
     def get_project_commits(
         self,
         project_id: int,

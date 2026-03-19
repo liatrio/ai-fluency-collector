@@ -34,6 +34,20 @@ CI_SKILL_MAPPINGS: list[dict] = [
 ]
 
 
+# Review behavioral metrics → skill mappings.
+# score_fn takes the computed metric rate (float 0.0–1.0) and returns an int score 0–100.
+REVIEW_SKILL_MAPPINGS: dict[str, list[dict]] = {
+    "lgtm_without_comment": [
+        {"skill_id": "tg-code-review", "score_fn": lambda rate: round(100 - (rate * 100))},
+    ],
+    "review_comment_depth": [
+        {"skill_id": "cq-evaluation", "score_fn": lambda ratio: round(ratio * 100)},
+    ],
+    "self_review_rate": [
+        {"skill_id": "cq-refinement", "score_fn": lambda rate: round(rate * 100)},
+    ],
+}
+
 # Member activity → skill mappings
 # Score based on percentage of members showing AI co-author activity
 MEMBER_SKILL_MAPPINGS: list[dict] = [
@@ -43,6 +57,40 @@ MEMBER_SKILL_MAPPINGS: list[dict] = [
     {"artifact_id": "coauthor-cursor", "skill_id": "im-autocomplete", "weight": 0.3},
     {"artifact_id": "coauthor-cursor", "skill_id": "im-inline-edit", "weight": 0.3},
 ]
+
+
+def calculate_review_scores(metrics, mappings: dict) -> list[dict]:
+    """Calculate skill scores from MR review behavioral metrics.
+
+    Args:
+        metrics: ReviewMetrics object from ReviewScanner.scan().
+        mappings: REVIEW_SKILL_MAPPINGS dict mapping metric keys to skill maps.
+
+    Returns:
+        List of {skill_id, score, evidence} dicts. Only scores > 0 are included.
+    """
+    if metrics is None:
+        return []
+
+    metric_values = {
+        "lgtm_without_comment": metrics.lgtm_rate,
+        "review_comment_depth": metrics.review_comment_depth,
+        "self_review_rate": metrics.self_review_rate,
+    }
+
+    signals: list[dict] = []
+    for metric_key, skill_maps in mappings.items():
+        value = metric_values.get(metric_key)
+        if value is None:
+            continue
+        for m in skill_maps:
+            score = m["score_fn"](value)
+            if score <= 0:
+                continue
+            evidence = metrics.evidence.get(metric_key, "detected")
+            signals.append({"skill_id": m["skill_id"], "score": score, "evidence": evidence})
+
+    return signals
 
 
 def calculate_member_scores(

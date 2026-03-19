@@ -10,6 +10,7 @@ def build_output(
     artifact_signals: list[dict],
     ci_signals: list[dict],
     member_signals: list[dict] | None = None,
+    review_signals: list[dict] | None = None,
 ) -> dict:
     """Build the output dict matching the ai-fluency import schema.
 
@@ -38,6 +39,14 @@ def build_output(
             {
                 "source_id": "gitlab-member-activity",
                 "signals": member_signals,
+            }
+        )
+
+    if review_signals:
+        sources.append(
+            {
+                "source_id": "gitlab-review-signals",
+                "signals": review_signals,
             }
         )
 

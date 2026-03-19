@@ -44,7 +44,19 @@ This document describes every artifact and CI pattern the collector detects, whi
 | `coauthor-cursor` | Co-Authored-By: Cursor in commit messages | `im-autocomplete` | 0.3 |
 | `coauthor-cursor` | (same) | `im-inline-edit` | 0.3 |
 
-Member activity scores are based on the percentage of team members who have AI co-authored commits. For example, if 3 out of 5 members have Claude co-authored commits, the weight contribution is scaled by 3/5 = 60%.
+Member activity scores are based on the percentage of team members who have AI co-authored commits.
+
+## MR Review Behavioral Mappings
+
+Computed from aggregated merge request data for the survey period. Scores are derived from team-level metrics with no individual attribution.
+
+| Metric Key | What It Measures | Skill ID | Score Formula |
+|---|---|---|---|
+| `lgtm_without_comment` | % of team-authored MRs approved with zero non-system review notes | `tg-code-review` | `100 - (rate × 100)` (lower LGTM rate = higher score) |
+| `review_comment_depth` | Avg ratio of files with team reviewer discussion threads to total changed files | `cq-evaluation` | `ratio × 100` |
+| `self_review_rate` | % of team-authored MRs where author commented before first approval | `cq-refinement` | `rate × 100` |
+
+System notes (bot comments, status changes, label additions) are excluded from all analysis. Only `system: false` notes count as review activity. For example, if 3 out of 5 members have Claude co-authored commits, the weight contribution is scaled by 3/5 = 60%.
 
 ## Branch Scanning
 
@@ -177,5 +189,17 @@ ARTIFACT_SKILL_MAPPINGS: list[dict] = [
    ```
 2. Add mapping entries to `MEMBER_SKILL_MAPPINGS` in `scoring.py`
 3. Update this document to reflect the new mappings
+
+### To add a new review metric
+
+1. Add metric computation to `ReviewScanner.scan()` in `src/ai_fluency_collector/scanners/review_scanner.py`
+2. Populate `metrics.evidence[new_metric_key]` with a team-level evidence string
+3. Add a mapping entry to `REVIEW_SKILL_MAPPINGS` in `scoring.py`:
+   ```python
+   "new_metric_key": [
+       {"skill_id": "target-skill-id", "score_fn": lambda rate: round(rate * 100)},
+   ],
+   ```
+4. Update this document
 
 **Important**: Keep this document in sync with the code. If mappings change, update this document in the same commit.
