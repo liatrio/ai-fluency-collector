@@ -57,6 +57,17 @@ REVIEW_SKILL_MAPPINGS: dict[str, list[dict]] = {
     ],
 }
 
+# MR co-author tag → skill mappings (period-specific, source: gitlab-member-activity).
+# score_fn takes the team-level MR rate (float 0.0–1.0) and returns an int score 0–100.
+MR_COAUTHOR_SKILL_MAPPINGS: dict[str, list[dict]] = {
+    "mr_ai_coauthor_rate": [
+        {"skill_id": "im-chat", "score_fn": lambda rate: round(rate * 100)},
+    ],
+    "mr_agentic_coauthor_rate": [
+        {"skill_id": "im-supervised-agent", "score_fn": lambda rate: round(rate * 100)},
+    ],
+}
+
 # Member activity → skill mappings
 # Score based on percentage of members showing AI co-author activity
 MEMBER_SKILL_MAPPINGS: list[dict] = [
@@ -101,6 +112,39 @@ def calculate_pipeline_scores(
             score = m["score_fn"](mean_rate)
             if score <= 0:
                 continue
+            signals.append({"skill_id": m["skill_id"], "score": score, "evidence": evidence})
+
+    return signals
+
+
+def calculate_mr_coauthor_scores(metrics, mappings: dict) -> list[dict]:
+    """Calculate skill scores from MR co-author tag metrics.
+
+    Args:
+        metrics: ReviewMetrics object from ReviewScanner.scan().
+        mappings: MR_COAUTHOR_SKILL_MAPPINGS dict.
+
+    Returns:
+        List of {skill_id, score, evidence} dicts. Only scores > 0 are included.
+    """
+    if metrics is None:
+        return []
+
+    metric_values = {
+        "mr_ai_coauthor_rate": metrics.mr_ai_coauthor_rate,
+        "mr_agentic_coauthor_rate": metrics.mr_agentic_coauthor_rate,
+    }
+
+    signals: list[dict] = []
+    for metric_key, skill_maps in mappings.items():
+        value = metric_values.get(metric_key)
+        if value is None:
+            continue
+        for m in skill_maps:
+            score = m["score_fn"](value)
+            if score <= 0:
+                continue
+            evidence = metrics.evidence.get(metric_key, "detected")
             signals.append({"skill_id": m["skill_id"], "score": score, "evidence": evidence})
 
     return signals

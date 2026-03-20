@@ -25,8 +25,10 @@ from ai_fluency_collector.scoring import (
     CI_PIPELINE_SKILL_MAPPINGS,
     CI_SKILL_MAPPINGS,
     MEMBER_SKILL_MAPPINGS,
+    MR_COAUTHOR_SKILL_MAPPINGS,
     REVIEW_SKILL_MAPPINGS,
     calculate_member_scores,
+    calculate_mr_coauthor_scores,
     calculate_pipeline_scores,
     calculate_review_scores,
     calculate_scores,
@@ -390,11 +392,17 @@ def scan(
 
         review_metrics = review_scanner.scan(effective_members, week)
         review_signals = calculate_review_scores(review_metrics, REVIEW_SKILL_MAPPINGS)
+        mr_coauthor_signals = calculate_mr_coauthor_scores(
+            review_metrics, MR_COAUTHOR_SKILL_MAPPINGS
+        )
         click.echo(f"  {review_metrics.total_authored_mrs} authored MRs analyzed")
         click.echo(f"  → {len(review_signals)} review signals detected")
+        click.echo(f"  → {len(mr_coauthor_signals)} MR co-author signals detected")
+
+        week_member_signals = member_signals + mr_coauthor_signals
 
         data = build_output(
-            team.code, week, artifact_signals, week_ci_signals, member_signals, review_signals
+            team.code, week, artifact_signals, week_ci_signals, week_member_signals, review_signals
         )
         output_path = write_output(data, team.code, week)
         output_paths.append(output_path)
