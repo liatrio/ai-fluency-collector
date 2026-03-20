@@ -255,6 +255,14 @@ def _check_ci_signals(
 
 
 @dataclass
+class CoverageResult:
+    """Mean coverage percentage for a single project over a period."""
+
+    coverage: float | None  # None when no coverage jobs found
+    project_count: int = 1  # always 1; aggregated by calculate_coverage_scores
+
+
+@dataclass
 class PipelinePassResult:
     """First-attempt pipeline pass counts for a single project."""
 
@@ -416,3 +424,31 @@ class CIScanner:
                 pass_count += 1
 
         return PipelinePassResult(pass_count=pass_count, total_count=total_count)
+
+    def scan_coverage(self, project_path: str, period: str) -> CoverageResult:
+        """Fetch mean test coverage for a project over a survey period.
+
+        Queries successful CI jobs updated within the period and averages
+        non-null coverage values reported by GitLab.
+
+        Args:
+            project_path: GitLab project path (e.g. 'group/project').
+            period: Survey period in YYYY-WNN format.
+
+        Returns:
+            CoverageResult with mean coverage float, or None if no coverage jobs found.
+        """
+        start_date, _ = _period_to_date_range(period)
+        jobs = self.client.get_jobs(project_path, scope="success", updated_after=start_date)
+
+        coverage_values = [
+            j["coverage"]
+            for j in jobs
+            if j.get("coverage") is not None
+        ]
+
+        if not coverage_values:
+            return CoverageResult(coverage=None)
+
+        mean_coverage = sum(coverage_values) / len(coverage_values)
+        return CoverageResult(coverage=mean_coverage)
