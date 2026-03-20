@@ -57,6 +57,14 @@ REVIEW_SKILL_MAPPINGS: dict[str, list[dict]] = {
     ],
 }
 
+# Coverage delta → skill mappings.
+# score_fn takes coverage delta (float, can be None) and returns an int score 0–100.
+# Formula: clamp(round(50 + delta * 10), 0, 100). No delta → score based on absolute coverage.
+COVERAGE_SKILL_MAPPINGS: list[dict] = [
+    {"skill_id": "pm-core"},
+    {"skill_id": "cq-evaluation"},
+]
+
 # MR co-author tag → skill mappings (period-specific, source: gitlab-member-activity).
 # score_fn takes the team-level MR rate (float 0.0–1.0) and returns an int score 0–100.
 MR_COAUTHOR_SKILL_MAPPINGS: dict[str, list[dict]] = {
@@ -77,6 +85,66 @@ MEMBER_SKILL_MAPPINGS: list[dict] = [
     {"artifact_id": "coauthor-cursor", "skill_id": "im-autocomplete", "weight": 0.3},
     {"artifact_id": "coauthor-cursor", "skill_id": "im-inline-edit", "weight": 0.3},
 ]
+
+
+def calculate_coverage_scores(
+    current_results: list,
+    prior_results: list | None,
+    mappings: list[dict],
+) -> list[dict]:
+    """Calculate skill scores from per-project coverage data across two periods.
+
+    Computes mean coverage for each period across projects that have data,
+    derives a delta, and applies the delta formula:
+        score = clamp(round(50 + delta * 10), 0, 100)
+
+    When no prior period data is available, falls back to absolute coverage:
+        score = clamp(round(coverage), 0, 100)
+
+    Projects with no coverage jobs are excluded from both means.
+
+    Args:
+        current_results: List of CoverageResult for the current period.
+        prior_results: List of CoverageResult for the prior period, or None.
+        mappings: COVERAGE_SKILL_MAPPINGS list.
+
+    Returns:
+        List of {skill_id, score, evidence} dicts. Empty if no coverage data.
+    """
+    current_with_data = [r for r in current_results if r.coverage is not None]
+    if not current_with_data:
+        return []
+
+    mean_current = sum(r.coverage for r in current_with_data) / len(current_with_data)
+    num_projects = len(current_with_data)
+
+    # Compute delta if prior data available
+    delta: float | None = None
+    if prior_results:
+        prior_with_data = [r for r in prior_results if r.coverage is not None]
+        if prior_with_data:
+            mean_prior = sum(r.coverage for r in prior_with_data) / len(prior_with_data)
+            delta = mean_current - mean_prior
+
+    # Score formula
+    if delta is not None:
+        score = max(0, min(100, round(50 + delta * 10)))
+        delta_str = f"{'+' if delta >= 0 else ''}{delta:.1f}%"
+        evidence = (
+            f"Test coverage: {mean_current:.0f}% "
+            f"({delta_str} from prior period, N={num_projects} projects)"
+        )
+    else:
+        score = max(0, min(100, round(mean_current)))
+        evidence = f"Test coverage: {mean_current:.0f}% (N={num_projects} projects)"
+
+    if score <= 0:
+        return []
+
+    return [
+        {"skill_id": m["skill_id"], "score": score, "evidence": evidence}
+        for m in mappings
+    ]
 
 
 def calculate_pipeline_scores(

@@ -34,6 +34,28 @@ This document describes every artifact and CI pattern the collector detects, whi
 | `deployment-gates` | Deploy stages with environment and rules | `sdlc-deployment` | 0.5 |
 | `deployment-gates` | (same) | `tg-supervised-auto` | 0.5 |
 
+## CI Coverage Delta
+
+Computed from successful CI job coverage values for the current and prior survey periods. Scores are team-level with no individual attribution. Signals are emitted under `gitlab-ci-config`.
+
+| Skill ID | What It Measures | Score Formula |
+|---|---|---|
+| `pm-core` | Coverage trend across team projects | See below |
+| `cq-evaluation` | Coverage trend across team projects | See below |
+
+**Score formula (delta-based):**
+```
+score = clamp(round(50 + delta * 10), 0, 100)
+```
+- `+5%` delta → 100; `-5%` delta → 0; no change → 50
+- When no prior period data is available, falls back to absolute: `clamp(round(coverage), 0, 100)`
+
+**Aggregation:** Mean coverage across projects with coverage jobs; projects without coverage data are excluded.
+
+**Evidence format:** "Test coverage: 74% (+3.0% from prior period, N=3 projects)"
+
+Mappings live in `src/ai_fluency_collector/scoring.py` as `COVERAGE_SKILL_MAPPINGS`.
+
 ## CI Pipeline Metrics
 
 Computed from GitLab pipeline history for the survey period. Scores are team-level with no individual attribution.

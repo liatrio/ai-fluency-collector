@@ -24,9 +24,11 @@ from ai_fluency_collector.scoring import (
     ARTIFACT_SKILL_MAPPINGS,
     CI_PIPELINE_SKILL_MAPPINGS,
     CI_SKILL_MAPPINGS,
+    COVERAGE_SKILL_MAPPINGS,
     MEMBER_SKILL_MAPPINGS,
     MR_COAUTHOR_SKILL_MAPPINGS,
     REVIEW_SKILL_MAPPINGS,
+    calculate_coverage_scores,
     calculate_member_scores,
     calculate_mr_coauthor_scores,
     calculate_pipeline_scores,
@@ -82,6 +84,16 @@ def _dates_to_iso_weeks(from_str: str, to_str: str) -> list[str]:
         weeks.append(f"{iso[0]}-W{iso[1]:02d}")
         current += timedelta(days=7)
     return weeks
+
+
+def _prior_iso_week(period: str) -> str:
+    """Return the ISO week immediately before the given YYYY-WNN period."""
+    year = int(period[:4])
+    week = int(period[6:])
+    monday = date.fromisocalendar(year, week, 1)
+    prior_monday = monday - timedelta(days=7)
+    iso = prior_monday.isocalendar()
+    return f"{iso[0]}-W{iso[1]:02d}"
 
 
 def _slugify(text: str) -> str:
@@ -388,7 +400,22 @@ def scan(
         click.echo(f"  {total_pipelines} pipelines analyzed across projects")
         click.echo(f"  → {len(pipeline_signals)} pipeline signals detected")
 
-        week_ci_signals = ci_signals + pipeline_signals
+        # Coverage delta (current period vs prior period)
+        prior_week = _prior_iso_week(week)
+        current_coverage = []
+        prior_coverage = []
+        for project in team.projects:
+            try:
+                current_coverage.append(ci_scanner.scan_coverage(project, week))
+                prior_coverage.append(ci_scanner.scan_coverage(project, prior_week))
+            except (GitLabAccessError, GitLabAuthError, GitLabServerError) as e:
+                raise click.ClickException(str(e)) from e
+        coverage_signals = calculate_coverage_scores(
+            current_coverage, prior_coverage, COVERAGE_SKILL_MAPPINGS
+        )
+        click.echo(f"  → {len(coverage_signals)} coverage signals detected")
+
+        week_ci_signals = ci_signals + pipeline_signals + coverage_signals
 
         review_metrics = review_scanner.scan(effective_members, week)
         review_signals = calculate_review_scores(review_metrics, REVIEW_SKILL_MAPPINGS)
