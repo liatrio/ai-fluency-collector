@@ -80,7 +80,7 @@ def test_ci_scoring_context_present():
 
 
 def test_mixed_branches_breakdown():
-    """Breakdown correctly describes projects across feature and default branches."""
+    """Breakdown uses plain language mentioning both branch types and missing projects."""
     results = [
         {"claude-md": FEATURE_BRANCH_WEIGHT},
         {"claude-md": DEFAULT_BRANCH_WEIGHT},
@@ -89,8 +89,10 @@ def test_mixed_branches_breakdown():
     signals = calculate_scores(results, ARTIFACT_SKILL_MAPPINGS)
     cq = next(s for s in signals if s["skill_id"] == "cq-context")
     breakdown = cq["scoring_context"]["breakdown"]
-    assert "1/3 on feature branches" in breakdown
-    assert "1/3 on default branch" in breakdown
+    assert "default branch" in breakdown
+    assert "feature branch" in breakdown
+    assert "2 of 3" in breakdown
+    assert "weight:" not in breakdown  # no internal weight values
 
 
 # ── calculate_member_scores ───────────────────────────────────────────────────
