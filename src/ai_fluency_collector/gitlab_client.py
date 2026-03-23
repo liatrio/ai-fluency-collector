@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 import requests
+
+DEFAULT_TIMEOUT = 30  # seconds
 
 
 class GitLabAuthError(Exception):
@@ -21,6 +24,14 @@ class GitLabServerError(Exception):
     pass
 
 
+class GitLabRateLimitError(Exception):
+    pass
+
+
+class GitLabTimeoutError(Exception):
+    pass
+
+
 def _check_server_error(resp: requests.Response, context: str = "") -> None:
     """Raise GitLabServerError on 5xx responses."""
     if 500 <= resp.status_code < 600:
@@ -31,13 +42,38 @@ def _check_server_error(resp: requests.Response, context: str = "") -> None:
         raise GitLabServerError(msg)
 
 
+def _check_rate_limit(resp: requests.Response, context: str = "") -> None:
+    """Raise GitLabRateLimitError on 429 responses with reset time if available."""
+    if resp.status_code != 429:
+        return
+    reset_header = resp.headers.get("RateLimit-Reset") or resp.headers.get("X-RateLimit-Reset")
+    if reset_header:
+        try:
+            reset_dt = datetime.fromtimestamp(int(reset_header), tz=timezone.utc)
+            reset_str = reset_dt.strftime("%H:%M UTC")
+            raise GitLabRateLimitError(
+                f"GitLab rate limit reached (resets at {reset_str}). Wait and retry."
+            )
+        except (ValueError, OSError):
+            pass
+    raise GitLabRateLimitError(
+        "GitLab rate limit reached. Wait a moment and retry."
+    )
+
+
 class GitLabClient:
     """Client for GitLab REST API v4."""
 
-    def __init__(self, token: str, base_url: str = "https://gitlab.com") -> None:
+    def __init__(
+        self,
+        token: str,
+        base_url: str = "https://gitlab.com",
+        timeout: int = DEFAULT_TIMEOUT,
+    ) -> None:
         if not base_url.startswith(("http://", "https://")):
             base_url = f"https://{base_url}"
         self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
         self.session = requests.Session()
         self.session.headers["PRIVATE-TOKEN"] = token
 
@@ -47,14 +83,32 @@ class GitLabClient:
     def _encode_project(self, project_path: str) -> str:
         return quote(project_path, safe="")
 
+    def _get(self, url: str, params: dict | None = None, context: str = "") -> requests.Response:
+        """Perform a GET request with timeout and rate limit handling."""
+        try:
+            resp = self.session.get(url, params=params, timeout=self.timeout)
+        except requests.Timeout:
+            msg = f"GitLab did not respond after {self.timeout}s"
+            if context:
+                msg += f" while {context}"
+            msg += ". Check your network or GitLab instance status."
+            raise GitLabTimeoutError(msg)
+        _check_rate_limit(resp, context)
+        return resp
+
     def validate_token(self) -> None:
         """Verify the token is valid by calling GET /user.
 
         Raises GitLabAuthError on 401 or connection errors.
         """
         try:
-            resp = self.session.get(self._api_url("/user"))
-        except (requests.ConnectionError, requests.Timeout, requests.exceptions.MissingSchema) as e:
+            resp = self.session.get(self._api_url("/user"), timeout=self.timeout)
+        except requests.Timeout as e:
+            raise GitLabAuthError(
+                f"Could not connect to {self.base_url} (timed out after {self.timeout}s). "
+                "Check the gitlab_url in your config."
+            ) from e
+        except (requests.ConnectionError, requests.exceptions.MissingSchema) as e:
             raise GitLabAuthError(
                 f"Could not connect to {self.base_url}. Check the gitlab_url in your config."
             ) from e
@@ -74,7 +128,15 @@ class GitLabClient:
         encoded_project = self._encode_project(project_path)
         encoded_file = quote(file_path, safe="")
         url = self._api_url(f"/projects/{encoded_project}/repository/files/{encoded_file}")
-        resp = self.session.head(url, params={"ref": ref})
+        try:
+            resp = self.session.head(url, params={"ref": ref}, timeout=self.timeout)
+        except requests.Timeout:
+            raise GitLabTimeoutError(
+                f"GitLab did not respond after {self.timeout}s "
+                f"while checking file '{file_path}' in '{project_path}'. "
+                "Check your network or GitLab instance status."
+            )
+        _check_rate_limit(resp, f"checking file '{file_path}' in '{project_path}'")
         _check_server_error(resp, f"checking file '{file_path}' in '{project_path}'")
         if resp.status_code == 200:
             return True
@@ -97,7 +159,11 @@ class GitLabClient:
         """Check if a directory exists in a project using the Repository Tree API."""
         encoded_project = self._encode_project(project_path)
         url = self._api_url(f"/projects/{encoded_project}/repository/tree")
-        resp = self.session.get(url, params={"path": dir_path, "ref": ref, "per_page": 1})
+        resp = self._get(
+            url,
+            params={"path": dir_path, "ref": ref, "per_page": 1},
+            context=f"checking directory '{dir_path}' in '{project_path}'",
+        )
         _check_server_error(resp, f"checking directory '{dir_path}' in '{project_path}'")
         if resp.status_code == 200:
             items = resp.json()
@@ -125,7 +191,11 @@ class GitLabClient:
         encoded_project = self._encode_project(project_path)
         encoded_file = quote(file_path, safe="")
         url = self._api_url(f"/projects/{encoded_project}/repository/files/{encoded_file}/raw")
-        resp = self.session.get(url, params={"ref": ref})
+        resp = self._get(
+            url,
+            params={"ref": ref},
+            context=f"fetching '{file_path}' from '{project_path}'",
+        )
         _check_server_error(resp, f"fetching '{file_path}' from '{project_path}'")
         if resp.status_code == 200:
             return resp.text
@@ -156,7 +226,11 @@ class GitLabClient:
         results: list[dict] = []
         page = 1
         while True:
-            resp = self.session.get(url, params={"per_page": 100, "page": page})
+            resp = self._get(
+                url,
+                params={"per_page": 100, "page": page},
+                context=f"listing branches for '{project_path}'",
+            )
             _check_server_error(resp, f"listing branches for '{project_path}'")
             if resp.status_code == 404:
                 raise GitLabAccessError(
@@ -188,7 +262,9 @@ class GitLabClient:
         Returns the user dict. Raises GitLabUserNotFoundError if not found.
         """
         url = self._api_url("/users")
-        resp = self.session.get(url, params={"username": username})
+        resp = self._get(
+            url, params={"username": username}, context=f"looking up user '{username}'"
+        )
         _check_server_error(resp, f"looking up user '{username}'")
         resp.raise_for_status()
         users = resp.json()
@@ -204,7 +280,11 @@ class GitLabClient:
         results: list[dict] = []
         page = 1
         while True:
-            resp = self.session.get(url, params={"per_page": 100, "page": page, "owned": True})
+            resp = self._get(
+                url,
+                params={"per_page": 100, "page": page, "owned": True},
+                context="listing user projects",
+            )
             _check_server_error(resp, "listing user projects")
             resp.raise_for_status()
             items = resp.json()
@@ -220,9 +300,10 @@ class GitLabClient:
         results: list[dict] = []
         page = 1
         while True:
-            resp = self.session.get(
+            resp = self._get(
                 url,
                 params={"action": action, "per_page": 100, "page": page},
+                context="listing user events",
             )
             _check_server_error(resp, "listing user events")
             resp.raise_for_status()
@@ -264,7 +345,7 @@ class GitLabClient:
         page = 1
         while True:
             params["page"] = page
-            resp = self.session.get(url, params=params)
+            resp = self._get(url, params=params, context="searching merge requests")
             _check_server_error(resp, "searching merge requests")
             resp.raise_for_status()
             items = resp.json()
@@ -280,7 +361,11 @@ class GitLabClient:
         results: list[dict] = []
         page = 1
         while True:
-            resp = self.session.get(url, params={"per_page": 100, "page": page})
+            resp = self._get(
+                url,
+                params={"per_page": 100, "page": page},
+                context=f"fetching commits for MR !{mr_iid}",
+            )
             _check_server_error(resp, f"fetching commits for MR !{mr_iid}")
             if resp.status_code == 404:
                 return []
@@ -298,7 +383,11 @@ class GitLabClient:
         results: list[dict] = []
         page = 1
         while True:
-            resp = self.session.get(url, params={"per_page": 100, "page": page})
+            resp = self._get(
+                url,
+                params={"per_page": 100, "page": page},
+                context=f"fetching notes for MR !{mr_iid}",
+            )
             _check_server_error(resp, f"fetching notes for MR !{mr_iid}")
             if resp.status_code == 404:
                 return []
@@ -316,7 +405,11 @@ class GitLabClient:
         results: list[dict] = []
         page = 1
         while True:
-            resp = self.session.get(url, params={"per_page": 100, "page": page})
+            resp = self._get(
+                url,
+                params={"per_page": 100, "page": page},
+                context=f"fetching discussions for MR !{mr_iid}",
+            )
             _check_server_error(resp, f"fetching discussions for MR !{mr_iid}")
             if resp.status_code == 404:
                 return []
@@ -331,7 +424,7 @@ class GitLabClient:
     def get_mr_approvals(self, project_id: int, mr_iid: int) -> dict:
         """Get approval state for a merge request."""
         url = self._api_url(f"/projects/{project_id}/merge_requests/{mr_iid}/approvals")
-        resp = self.session.get(url)
+        resp = self._get(url, context=f"fetching approvals for MR !{mr_iid}")
         _check_server_error(resp, f"fetching approvals for MR !{mr_iid}")
         if resp.status_code == 404:
             return {}
@@ -344,7 +437,11 @@ class GitLabClient:
         results: list[dict] = []
         page = 1
         while True:
-            resp = self.session.get(url, params={"per_page": 100, "page": page})
+            resp = self._get(
+                url,
+                params={"per_page": 100, "page": page},
+                context=f"fetching diffs for MR !{mr_iid}",
+            )
             _check_server_error(resp, f"fetching diffs for MR !{mr_iid}")
             if resp.status_code == 404:
                 return []
@@ -376,7 +473,7 @@ class GitLabClient:
         page = 1
         while True:
             params["page"] = page
-            resp = self.session.get(url, params=params)
+            resp = self._get(url, params=params, context=f"listing jobs for '{project_path}'")
             _check_server_error(resp, f"listing jobs for '{project_path}'")
             if resp.status_code == 404:
                 return []
@@ -419,7 +516,9 @@ class GitLabClient:
         page = 1
         while True:
             params["page"] = page
-            resp = self.session.get(url, params=params)
+            resp = self._get(
+                url, params=params, context=f"listing pipelines for '{project_path}'"
+            )
             _check_server_error(resp, f"listing pipelines for '{project_path}'")
             if resp.status_code == 404:
                 return []
@@ -464,7 +563,7 @@ class GitLabClient:
         page = 1
         while True:
             params["page"] = page
-            resp = self.session.get(url, params=params)
+            resp = self._get(url, params=params, context="listing project commits")
             _check_server_error(resp, "listing project commits")
             if resp.status_code == 404:
                 return []
