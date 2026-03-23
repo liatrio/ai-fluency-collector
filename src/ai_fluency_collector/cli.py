@@ -110,6 +110,22 @@ def _prior_iso_week(period: str) -> str:
     return f"{iso[0]}-W{iso[1]:02d}"
 
 
+def _period_start_date(periods: list[str]) -> date:
+    """Return the Monday of the earliest week in the periods list."""
+    earliest = min(periods)
+    year = int(earliest[:4])
+    week = int(earliest[6:])
+    return date.fromisocalendar(year, week, 1)
+
+
+def _period_end_date(periods: list[str]) -> date:
+    """Return the Sunday of the latest week in the periods list."""
+    latest = max(periods)
+    year = int(latest[:4])
+    week = int(latest[6:])
+    return date.fromisocalendar(year, week, 7)
+
+
 def _slugify(text: str) -> str:
     """Convert text to a URL-friendly slug."""
     slug = text.lower().strip()
@@ -296,9 +312,13 @@ def scan(
     click.echo(f"  Output:   {output_display}")
     click.echo()
 
-    # 10. Scan for repo artifacts (period-agnostic — reflects current branch state)
+    # 10. Compute period-derived dates for scanners
+    reference_date = _period_end_date(periods)
+    since_date = _period_start_date(periods).isoformat()
+
+    # 11. Scan for repo artifacts (period-scoped — active branches relative to period end)
     click.echo("Scanning for repo artifacts...")
-    scanner = ArtifactScanner(client)
+    scanner = ArtifactScanner(client, reference_date=reference_date)
     all_artifact_results: list[dict[str, bool]] = []
 
     for project in team.projects:
@@ -307,7 +327,7 @@ def scan(
                 _get_active_branches,
             )
 
-            branches = _get_active_branches(client, project)
+            branches = _get_active_branches(client, project, reference_date=reference_date)
             click.echo(f"    [{project}] {len(branches)} active branches found")
             for b in branches:
                 click.echo(f"      {b['name']} (weight={b['weight']})")
@@ -342,9 +362,9 @@ def scan(
     click.echo(f"  → {len(artifact_signals)} artifact signals detected")
     click.echo()
 
-    # 12. Scan for CI config patterns (period-agnostic — reflects current branch state)
+    # 12. Scan for CI config patterns (period-scoped — active branches relative to period end)
     click.echo("Scanning CI configurations...")
-    ci_scanner = CIScanner(client, ci_signals=team.ci_signals)
+    ci_scanner = CIScanner(client, ci_signals=team.ci_signals, reference_date=reference_date)
     all_ci_results: list[dict[str, bool]] = []
 
     for project in team.projects:
@@ -365,9 +385,9 @@ def scan(
     click.echo(f"  → {len(ci_signals)} CI signals detected")
     click.echo()
 
-    # 14. Scan member activity (period-agnostic — 90-day rolling lookback)
+    # 14. Scan member activity (period-scoped — commits since period start)
     click.echo("Scanning member activity...")
-    member_scanner = MemberScanner(client, team.projects)
+    member_scanner = MemberScanner(client, team.projects, since_date=since_date)
     try:
         member_results = member_scanner.scan_all_members(effective_members)
     except (GitLabUserNotFoundError, GitLabServerError) as e:

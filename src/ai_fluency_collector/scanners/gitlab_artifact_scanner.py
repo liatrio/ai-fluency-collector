@@ -60,14 +60,19 @@ ARTIFACT_DEFINITIONS: list[dict] = [
 
 
 def _get_active_branches(
-    client: GitLabClient, project_path: str, active_days: int = 90
+    client: GitLabClient,
+    project_path: str,
+    active_days: int = 90,
+    reference_date: date | None = None,
 ) -> list[dict]:
     """Get active branches with their type weight.
 
     Returns list of {"name": str, "weight": float} for branches
-    with a commit within active_days.
+    with a commit within active_days of reference_date.
+    If reference_date is None, defaults to date.today().
     """
-    cutoff = date.today() - timedelta(days=active_days)
+    ref_date = reference_date if reference_date is not None else date.today()
+    cutoff = ref_date - timedelta(days=active_days)
     cutoff_str = cutoff.isoformat()
     branches = client.get_branches(project_path)
     active: list[dict] = []
@@ -90,9 +95,15 @@ def _get_active_branches(
 class ArtifactScanner:
     """Scans GitLab projects for AI adoption artifact files and directories."""
 
-    def __init__(self, client: GitLabClient, active_days: int = 90) -> None:
+    def __init__(
+        self,
+        client: GitLabClient,
+        active_days: int = 90,
+        reference_date: date | None = None,
+    ) -> None:
         self.client = client
         self.active_days = active_days
+        self.reference_date = reference_date
 
     def _check_artifact_on_branch(self, project_path: str, artifact: dict, ref: str) -> bool:
         """Check if an artifact exists on a specific branch."""
@@ -114,7 +125,9 @@ class ArtifactScanner:
 
         Raises GitLabAccessError if the project is inaccessible.
         """
-        active_branches = _get_active_branches(self.client, project_path, self.active_days)
+        active_branches = _get_active_branches(
+            self.client, project_path, self.active_days, self.reference_date
+        )
 
         # If no active branches found, fall back to scanning HEAD only
         if not active_branches:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date, timedelta
 
 from ai_fluency_collector.gitlab_client import GitLabClient
 
@@ -40,11 +39,11 @@ class MemberScanner:
         self,
         client: GitLabClient,
         team_projects: list[str],
-        lookback_days: int = 90,
+        since_date: str,
     ) -> None:
         self.client = client
         self.team_project_paths = {p.lower() for p in team_projects}
-        self.since_date = (date.today() - timedelta(days=lookback_days)).isoformat()
+        self.since_date = since_date
 
     def _discover_member_repos(self, user_id: int) -> list[dict]:
         """Discover repos a member owns or has pushed to, excluding team projects."""
