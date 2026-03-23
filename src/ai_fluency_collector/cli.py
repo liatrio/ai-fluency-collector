@@ -12,7 +12,9 @@ from ai_fluency_collector.gitlab_client import (
     GitLabAccessError,
     GitLabAuthError,
     GitLabClient,
+    GitLabRateLimitError,
     GitLabServerError,
+    GitLabTimeoutError,
     GitLabUserNotFoundError,
 )
 from ai_fluency_collector.output import build_output, write_output
@@ -37,6 +39,15 @@ from ai_fluency_collector.scoring import (
 )
 
 PERIOD_PATTERN = re.compile(r"^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$")
+
+# Convenience tuple for catching all recoverable GitLab API errors in one except clause.
+_GITLAB_ERRORS = (
+    GitLabAccessError,
+    GitLabAuthError,
+    GitLabRateLimitError,
+    GitLabServerError,
+    GitLabTimeoutError,
+)
 
 
 def current_iso_week() -> str:
@@ -258,7 +269,7 @@ def scan(
             try:
                 client.get_branches(project)
                 click.echo(f"  {project}: accessible")
-            except (GitLabAccessError, GitLabAuthError, GitLabServerError) as e:
+            except _GITLAB_ERRORS as e:
                 click.echo(f"  {project}: ERROR - {e}")
         click.echo()
         click.echo("Validation complete.")
@@ -302,7 +313,7 @@ def scan(
 
         try:
             result = scanner.scan_project(project)
-        except (GitLabAccessError, GitLabAuthError, GitLabServerError) as e:
+        except _GITLAB_ERRORS as e:
             raise click.ClickException(str(e)) from e
 
         if verbose:
@@ -336,7 +347,7 @@ def scan(
     for project in team.projects:
         try:
             result = ci_scanner.scan_project(project)
-        except (GitLabAccessError, GitLabAuthError, GitLabServerError) as e:
+        except _GITLAB_ERRORS as e:
             raise click.ClickException(str(e)) from e
 
         all_ci_results.append(result)
@@ -390,9 +401,10 @@ def scan(
         # Pipeline pass rate (period-specific CI signal)
         pipeline_results = []
         for project in team.projects:
+            click.echo(f"  Scanning pipelines for {project}...")
             try:
                 result = ci_scanner.scan_pipeline_pass_rate(project, week)
-            except (GitLabAccessError, GitLabAuthError, GitLabServerError) as e:
+            except _GITLAB_ERRORS as e:
                 raise click.ClickException(str(e)) from e
             pipeline_results.append(result)
         pipeline_signals = calculate_pipeline_scores(pipeline_results, CI_PIPELINE_SKILL_MAPPINGS)
@@ -405,10 +417,11 @@ def scan(
         current_coverage = []
         prior_coverage = []
         for project in team.projects:
+            click.echo(f"  Scanning coverage for {project}...")
             try:
                 current_coverage.append(ci_scanner.scan_coverage(project, week))
                 prior_coverage.append(ci_scanner.scan_coverage(project, prior_week))
-            except (GitLabAccessError, GitLabAuthError, GitLabServerError) as e:
+            except _GITLAB_ERRORS as e:
                 raise click.ClickException(str(e)) from e
         coverage_signals = calculate_coverage_scores(
             current_coverage, prior_coverage, COVERAGE_SKILL_MAPPINGS
@@ -677,7 +690,7 @@ def init() -> None:
             projects.append(project)
             project_default_branches[project] = default_branch
             click.echo(f"    Found: {len(branches)} branches, default: {default_branch}")
-        except (GitLabAccessError, GitLabAuthError, GitLabServerError) as e:
+        except _GITLAB_ERRORS as e:
             click.echo(
                 f"    Error: {e} "
                 "(path should match the URL after your GitLab domain, "
