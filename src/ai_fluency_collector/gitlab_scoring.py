@@ -112,7 +112,7 @@ def _coding_time_score(median_hours: float) -> int:
 
 MR_CODING_TIME_SKILL_MAPPINGS: dict[str, list[dict]] = {
     "coding_time_median": [
-        {"skill_id": "im-inline-editing", "score_fn": _coding_time_score},
+        {"skill_id": "im-inline-edit", "score_fn": _coding_time_score},
         {"skill_id": "im-supervised-agent", "score_fn": _coding_time_score},
     ],
 }

@@ -475,11 +475,11 @@ def test_calculate_scores_evidence_in_signal():
 
 
 def test_mr_signals_emits_both_coding_time_skills():
-    """coding_time_median → im-inline-editing AND im-supervised-agent."""
+    """coding_time_median → im-inline-edit AND im-supervised-agent."""
     metrics = _mr_metrics(None, coding_time_median=5.0)
     signals = calculate_mr_signals(metrics, MR_SIZE_SKILL_MAPPINGS, MR_CODING_TIME_SKILL_MAPPINGS)
     skill_ids = {s["skill_id"] for s in signals}
-    assert "im-inline-editing" in skill_ids
+    assert "im-inline-edit" in skill_ids
     assert "im-supervised-agent" in skill_ids
 
 
@@ -488,7 +488,7 @@ def test_mr_signals_correct_score_for_fast_coding():
     metrics = _mr_metrics(None, coding_time_median=1.0)
     signals = calculate_mr_signals(metrics, MR_SIZE_SKILL_MAPPINGS, MR_CODING_TIME_SKILL_MAPPINGS)
     scores = {s["skill_id"]: s["score"] for s in signals}
-    assert scores["im-inline-editing"] == 100
+    assert scores["im-inline-edit"] == 100
     assert scores["im-supervised-agent"] == 100
 
 
@@ -497,7 +497,7 @@ def test_mr_signals_correct_score_for_slow_coding():
     metrics = _mr_metrics(None, coding_time_median=100.0)
     signals = calculate_mr_signals(metrics, MR_SIZE_SKILL_MAPPINGS, MR_CODING_TIME_SKILL_MAPPINGS)
     scores = {s["skill_id"]: s["score"] for s in signals}
-    assert scores["im-inline-editing"] == 15
+    assert scores["im-inline-edit"] == 15
     assert scores["im-supervised-agent"] == 15
 
 
@@ -508,7 +508,7 @@ def test_mr_signals_both_present_combines_signals():
     # im-supervised-agent appears from BOTH size and coding time — should appear at least once
     skill_ids = [s["skill_id"] for s in signals]
     assert "im-supervised-agent" in skill_ids
-    assert "im-inline-editing" in skill_ids
+    assert "im-inline-edit" in skill_ids
 
 
 def test_mr_signals_none_metrics_no_signals():
