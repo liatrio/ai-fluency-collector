@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -74,8 +75,16 @@ class GitLabClient:
             base_url = f"https://{base_url}"
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.session = requests.Session()
-        self.session.headers["PRIVATE-TOKEN"] = token
+        self._token = token
+        self._local = threading.local()
+
+    @property
+    def session(self) -> requests.Session:
+        """Return a per-thread requests.Session, creating one if needed."""
+        if not hasattr(self._local, "session"):
+            self._local.session = requests.Session()
+            self._local.session.headers["PRIVATE-TOKEN"] = self._token
+        return self._local.session
 
     def _api_url(self, path: str) -> str:
         return f"{self.base_url}/api/v4{path}"

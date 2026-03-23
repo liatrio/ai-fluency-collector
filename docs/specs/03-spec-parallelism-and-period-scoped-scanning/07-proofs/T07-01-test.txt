@@ -1,0 +1,28 @@
+Type: test
+Command: python -m pytest tests/test_timeout_and_rate_limit.py -v
+Expected: 12 passed, including 3 new thread-safety tests
+Timestamp: 2026-03-23T00:00:00Z
+
+============================= test session starts ==============================
+platform darwin -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0 -- .venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/craigkilpatrick/liatrio/projects/ai-fluency-collector
+configfile: pyproject.toml
+collecting ... collected 12 items
+
+tests/test_timeout_and_rate_limit.py::test_timeout_raises_gitlab_timeout_error PASSED [  8%]
+tests/test_timeout_and_rate_limit.py::test_timeout_error_message_includes_advice PASSED [ 16%]
+tests/test_timeout_and_rate_limit.py::test_rate_limit_with_reset_header PASSED [ 25%]
+tests/test_timeout_and_rate_limit.py::test_rate_limit_without_reset_header PASSED [ 33%]
+tests/test_timeout_and_rate_limit.py::test_rate_limit_on_paginated_endpoint PASSED [ 41%]
+tests/test_timeout_and_rate_limit.py::test_default_timeout_is_configured PASSED [ 50%]
+tests/test_timeout_and_rate_limit.py::test_custom_timeout_respected PASSED [ 58%]
+tests/test_timeout_and_rate_limit.py::test_get_jobs_stops_after_max_pages PASSED [ 66%]
+tests/test_timeout_and_rate_limit.py::test_get_jobs_default_max_pages_is_five PASSED [ 75%]
+tests/test_timeout_and_rate_limit.py::test_each_thread_gets_its_own_session PASSED [ 83%]
+tests/test_timeout_and_rate_limit.py::test_main_thread_session_is_stable PASSED [ 91%]
+tests/test_timeout_and_rate_limit.py::test_thread_session_carries_auth_token PASSED [100%]
+
+============================== 12 passed in 0.17s ==============================
+
+Status: PASS

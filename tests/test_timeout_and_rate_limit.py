@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 import responses
 from requests.exceptions import Timeout
 
@@ -163,3 +165,50 @@ def test_get_jobs_default_max_pages_is_five():
     results = client.get_jobs("my-group/my-project")
 
     assert len(results) == 5
+
+
+# ── Thread-safety tests ───────────────────────────────────────────────────────
+
+
+def test_each_thread_gets_its_own_session():
+    """GitLabClient.session returns a distinct object in each thread."""
+    client = GitLabClient("test-token")
+    sessions: list = []
+    lock = threading.Lock()
+
+    def capture_session() -> None:
+        # Keep a live reference so the object is not garbage-collected
+        # before all threads have reported (which would allow id() reuse).
+        sess = client.session
+        with lock:
+            sessions.append(sess)
+
+    threads = [threading.Thread(target=capture_session) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # All 4 thread-local sessions must be distinct objects
+    assert len(set(id(s) for s in sessions)) == 4
+
+
+def test_main_thread_session_is_stable():
+    """Accessing session twice from the same thread returns the same object."""
+    client = GitLabClient("test-token")
+    assert client.session is client.session
+
+
+def test_thread_session_carries_auth_token():
+    """Each per-thread session has the PRIVATE-TOKEN header set correctly."""
+    client = GitLabClient("my-secret-token")
+    results: list[str] = []
+
+    def capture_token() -> None:
+        results.append(client.session.headers.get("PRIVATE-TOKEN", ""))
+
+    t = threading.Thread(target=capture_token)
+    t.start()
+    t.join()
+
+    assert results[0] == "my-secret-token"
