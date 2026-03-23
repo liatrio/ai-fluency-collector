@@ -1,0 +1,19 @@
+PROOF ARTIFACT: cli
+Command: source .venv/bin/activate && afc scan --config team.yaml --from 2026-03-01 --to 2026-03-14
+Expected: Completes without error and produces output files
+Timestamp: 2026-03-23T00:00:00Z
+---
+Status: SKIPPED
+Reason: No real team.yaml or GitLab token available in CI environment.
+The CLI correctness is verified by unit tests (T02-01-test.txt and T02-02-test.txt).
+The parallel scan implementation is verified by test_threadpoolexecutor_used_for_multi_project_scans
+which confirms ThreadPoolExecutor(max_workers=8) is called with executor.map() for multi-project scans.
+
+Functional verification via code inspection:
+- cli.py lines ~320-350: ArtifactScanner uses ThreadPoolExecutor(max_workers=8) with executor.map()
+- cli.py lines ~365-380: CIScanner uses ThreadPoolExecutor(max_workers=8) with executor.map()
+- cli.py lines ~415-430: Pipeline scan uses ThreadPoolExecutor(max_workers=8) with executor.map()
+- cli.py lines ~435-455: Coverage scan uses ThreadPoolExecutor(max_workers=8) with executor.map()
+- Result ordering preserved: list(executor.map(...)) maintains input order
+- Fail-fast: _GITLAB_ERRORS caught wrapping each executor.map() call
+- ReviewScanner: NOT parallelised (sequential, as required)

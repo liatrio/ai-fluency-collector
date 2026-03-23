@@ -1,0 +1,35 @@
+PROOF ARTIFACT: test
+Command: source .venv/bin/activate && pytest -v 2>&1
+Expected: All existing tests pass
+Timestamp: 2026-03-23T00:00:00Z
+---
+============================= test session starts ==============================
+platform darwin -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0
+cachedir: .pytest_cache
+rootdir: /Users/craigkilpatrick/liatrio/projects/ai-fluency-collector
+configfile: pyproject.toml
+testpaths: tests
+collecting ... collected 233 items
+
+tests/test_artifact_scanner.py ... (10 tests)
+tests/test_ci_pipeline_scanner.py ... (11 tests)
+tests/test_ci_scanner.py ... (20 tests)
+tests/test_ci_signals.py ... (11 tests)
+tests/test_cli.py ... (22 tests, includes new test_threadpoolexecutor_used_for_multi_project_scans)
+tests/test_config.py ... (16 tests)
+tests/test_coverage_scanner.py ... (15 tests)
+tests/test_date_range.py ... (11 tests)
+tests/test_github_artifact_scanner.py ... (8 tests)
+tests/test_github_review_scanner.py ... (9 tests)
+tests/test_init.py ... (9 tests)
+tests/test_member_scanner.py ... (12 tests)
+tests/test_mr_coauthor_scanner.py ... (14 tests)
+tests/test_output.py ... (10 tests)
+tests/test_review_scanner.py ... (16 tests)
+tests/test_scoring.py ... (12 tests)
+tests/test_scoring_context.py ... (20 tests)
+tests/test_timeout_and_rate_limit.py ... (7 tests)
+
+============================== 233 passed in 0.53s ==============================
+
+Status: PASS

@@ -1,0 +1,38 @@
+PROOF ARTIFACT: test
+Command: source .venv/bin/activate && pytest tests/test_cli.py -v 2>&1
+Expected: New test verifying ThreadPoolExecutor is used for multi-project scans passes
+Timestamp: 2026-03-23T00:00:00Z
+---
+============================= test session starts ==============================
+platform darwin -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0 -- /Users/craigkilpatrick/liatrio/projects/ai-fluency-collector/.venv/bin/python3.14
+cachedir: .pytest_cache
+rootdir: /Users/craigkilpatrick/liatrio/projects/ai-fluency-collector
+configfile: pyproject.toml
+collecting ... collected 22 items
+
+tests/test_cli.py::test_help_output PASSED                               [  4%]
+tests/test_cli.py::test_group_help_output PASSED                         [  9%]
+tests/test_cli.py::test_missing_config_file PASSED                       [ 13%]
+tests/test_cli.py::test_missing_gitlab_token PASSED                      [ 18%]
+tests/test_cli.py::test_invalid_period_format PASSED                     [ 22%]
+tests/test_cli.py::test_invalid_period_week_zero PASSED                  [ 27%]
+tests/test_cli.py::test_startup_banner PASSED                            [ 31%]
+tests/test_cli.py::test_default_period_uses_current_week PASSED          [ 36%]
+tests/test_cli.py::test_invalid_gitlab_token PASSED                      [ 40%]
+tests/test_cli.py::test_member_scanning_in_output PASSED                 [ 45%]
+tests/test_cli.py::test_validate_flag PASSED                             [ 50%]
+tests/test_cli.py::test_from_to_produces_one_file_per_week PASSED        [ 54%]
+tests/test_cli.py::test_from_to_banner_shows_range PASSED                [ 59%]
+tests/test_cli.py::test_from_without_to_errors PASSED                    [ 63%]
+tests/test_cli.py::test_to_without_from_errors PASSED                    [ 68%]
+tests/test_cli.py::test_from_to_and_period_mutually_exclusive PASSED     [ 72%]
+tests/test_cli.py::test_scan_from_to_in_config_used_as_fallback PASSED   [ 77%]
+tests/test_cli.py::test_cli_from_to_overrides_config_dates PASSED        [ 81%]
+tests/test_cli.py::test_from_after_to_errors PASSED                      [ 86%]
+tests/test_cli.py::test_gitlab_url_from_config PASSED                    [ 90%]
+tests/test_cli.py::test_gitlab_url_cli_overrides_config PASSED           [ 95%]
+tests/test_cli.py::test_threadpoolexecutor_used_for_multi_project_scans PASSED [100%]
+
+============================== 22 passed in 0.18s ==============================
+
+Status: PASS

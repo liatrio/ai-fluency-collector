@@ -390,3 +390,45 @@ def test_gitlab_url_cli_overrides_config(mock_client_cls, mock_member_cls, tmp_p
     assert result.exit_code == 0
     # CLI flag should take precedence
     mock_client_cls.assert_called_once_with("test-token", base_url="https://custom.gl")
+
+
+def _write_multi_project_config(tmp_path):
+    config = {
+        "team": {
+            "name": "Test Team",
+            "code": "test-team",
+            "members": ["alice.smith"],
+            "projects": ["group/project-one", "group/project-two", "group/project-three"],
+        }
+    }
+    path = tmp_path / "team.yaml"
+    path.write_text(yaml.dump(config))
+    return str(path)
+
+
+@patch("ai_fluency_collector.cli.ThreadPoolExecutor")
+@patch("ai_fluency_collector.cli.MemberScanner")
+@patch("ai_fluency_collector.cli.GitLabClient")
+def test_threadpoolexecutor_used_for_multi_project_scans(
+    mock_client_cls, mock_member_cls, mock_tpe_cls, tmp_path, monkeypatch
+):
+    """Verify ThreadPoolExecutor is invoked when multiple projects are configured."""
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    _setup_mock_client(mock_client_cls)
+    mock_member_cls.return_value.scan_all_members.return_value = [
+        MemberResult(username="alice.smith")
+    ]
+
+    # Configure the mock executor to behave correctly via context manager
+    mock_executor = mock_tpe_cls.return_value.__enter__.return_value
+    mock_executor.map.return_value = iter([{}, {}, {}])
+
+    config_path = _write_multi_project_config(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(main, ["scan", "--config", config_path, "--period", "2026-W12"])
+
+    assert result.exit_code == 0, result.output
+    # ThreadPoolExecutor should be called with max_workers=8
+    mock_tpe_cls.assert_called_with(max_workers=8)
+    # executor.map should be called for artifact and CI scans
+    assert mock_executor.map.call_count >= 2

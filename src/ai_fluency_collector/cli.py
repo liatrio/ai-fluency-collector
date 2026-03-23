@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 import click
@@ -321,24 +322,13 @@ def scan(
     scanner = ArtifactScanner(client, reference_date=reference_date)
     all_artifact_results: list[dict[str, bool]] = []
 
-    for project in team.projects:
-        if verbose:
-            from ai_fluency_collector.scanners.gitlab_artifact_scanner import (
-                _get_active_branches,
-            )
+    try:
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            artifact_scan_results = list(executor.map(scanner.scan_project, team.projects))
+    except _GITLAB_ERRORS as e:
+        raise click.ClickException(str(e)) from e
 
-            branches = _get_active_branches(client, project, reference_date=reference_date)
-            click.echo(f"    [{project}] {len(branches)} active branches found")
-            for b in branches:
-                click.echo(f"      {b['name']} (weight={b['weight']})")
-            if not branches:
-                click.echo("      (falling back to HEAD)")
-
-        try:
-            result = scanner.scan_project(project)
-        except _GITLAB_ERRORS as e:
-            raise click.ClickException(str(e)) from e
-
+    for project, result in zip(team.projects, artifact_scan_results):
         if verbose:
             for aid, weight in result.items():
                 if weight > 0:
@@ -367,12 +357,13 @@ def scan(
     ci_scanner = CIScanner(client, ci_signals=team.ci_signals, reference_date=reference_date)
     all_ci_results: list[dict[str, bool]] = []
 
-    for project in team.projects:
-        try:
-            result = ci_scanner.scan_project(project)
-        except _GITLAB_ERRORS as e:
-            raise click.ClickException(str(e)) from e
+    try:
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            ci_scan_results = list(executor.map(ci_scanner.scan_project, team.projects))
+    except _GITLAB_ERRORS as e:
+        raise click.ClickException(str(e)) from e
 
+    for project, result in zip(team.projects, ci_scan_results):
         all_ci_results.append(result)
         found = [pid for pid in CI_PATTERN_IDS if result.get(pid, False)]
         if found:
@@ -422,14 +413,17 @@ def scan(
             click.echo("Scanning pipeline pass rates and MR review patterns...")
 
         # Pipeline pass rate (period-specific CI signal)
-        pipeline_results = []
+        try:
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                pipeline_results = list(
+                    executor.map(
+                        lambda p: ci_scanner.scan_pipeline_pass_rate(p, week), team.projects
+                    )
+                )
+        except _GITLAB_ERRORS as e:
+            raise click.ClickException(str(e)) from e
         for project in team.projects:
             click.echo(f"  Scanning pipelines for {project}...")
-            try:
-                result = ci_scanner.scan_pipeline_pass_rate(project, week)
-            except _GITLAB_ERRORS as e:
-                raise click.ClickException(str(e)) from e
-            pipeline_results.append(result)
         pipeline_signals = calculate_pipeline_scores(pipeline_results, CI_PIPELINE_SKILL_MAPPINGS)
         total_pipelines = sum(r.total_count for r in pipeline_results)
         click.echo(f"  {total_pipelines} pipelines analyzed across projects")
@@ -439,13 +433,22 @@ def scan(
         prior_week = _prior_iso_week(week)
         current_coverage = []
         prior_coverage = []
-        for project in team.projects:
+
+        def _scan_coverage_pair(project: str) -> tuple:
+            return (
+                ci_scanner.scan_coverage(project, week),
+                ci_scanner.scan_coverage(project, prior_week),
+            )
+
+        try:
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                coverage_pairs = list(executor.map(_scan_coverage_pair, team.projects))
+        except _GITLAB_ERRORS as e:
+            raise click.ClickException(str(e)) from e
+        for project, (curr, prior) in zip(team.projects, coverage_pairs):
             click.echo(f"  Scanning coverage for {project}...")
-            try:
-                current_coverage.append(ci_scanner.scan_coverage(project, week))
-                prior_coverage.append(ci_scanner.scan_coverage(project, prior_week))
-            except _GITLAB_ERRORS as e:
-                raise click.ClickException(str(e)) from e
+            current_coverage.append(curr)
+            prior_coverage.append(prior)
         coverage_signals = calculate_coverage_scores(
             current_coverage, prior_coverage, COVERAGE_SKILL_MAPPINGS
         )
