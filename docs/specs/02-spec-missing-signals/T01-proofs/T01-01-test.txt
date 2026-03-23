@@ -1,0 +1,27 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0 -- /Users/craigkilpatrick/liatrio/projects/ai-fluency-collector/.venv/bin/python3.14
+cachedir: .pytest_cache
+rootdir: /Users/craigkilpatrick/liatrio/projects/ai-fluency-collector
+configfile: pyproject.toml
+collecting ... collected 18 items
+
+tests/test_scoring_context.py::test_artifact_scoring_context_present PASSED [  5%]
+tests/test_scoring_context.py::test_artifact_scoring_context_feature_branch PASSED [ 11%]
+tests/test_scoring_context.py::test_artifact_scoring_context_default_branch PASSED [ 16%]
+tests/test_scoring_context.py::test_artifact_scoring_context_max_from_signal_feature PASSED [ 22%]
+tests/test_scoring_context.py::test_artifact_scoring_context_max_from_signal_default PASSED [ 27%]
+tests/test_scoring_context.py::test_ci_scoring_context_present PASSED    [ 33%]
+tests/test_scoring_context.py::test_mixed_branches_breakdown PASSED      [ 38%]
+tests/test_scoring_context.py::test_artifact_missing_signals_partial PASSED [ 44%]
+tests/test_scoring_context.py::test_artifact_missing_signals_omitted_when_all_found PASSED [ 50%]
+tests/test_scoring_context.py::test_ci_missing_signals PASSED            [ 55%]
+tests/test_scoring_context.py::test_member_scoring_context_present PASSED [ 61%]
+tests/test_scoring_context.py::test_member_scoring_context_max_all_members PASSED [ 66%]
+tests/test_scoring_context.py::test_review_scoring_context_present PASSED [ 72%]
+tests/test_scoring_context.py::test_pipeline_scoring_context_present PASSED [ 77%]
+tests/test_scoring_context.py::test_coverage_scoring_context_present PASSED [ 83%]
+tests/test_scoring_context.py::test_mr_coauthor_scoring_context_present PASSED [ 88%]
+tests/test_scoring_context.py::test_github_review_scoring_context_present PASSED [ 94%]
+tests/test_scoring_context.py::test_github_artifact_scoring_context_present PASSED [100%]
+
+============================== 18 passed in 0.10s ==============================
