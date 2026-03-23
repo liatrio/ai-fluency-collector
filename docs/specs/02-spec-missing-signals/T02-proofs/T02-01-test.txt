@@ -1,0 +1,29 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0 -- /Users/craigkilpatrick/liatrio/projects/ai-fluency-collector/.venv/bin/python3.14
+cachedir: .pytest_cache
+rootdir: /Users/craigkilpatrick/liatrio/projects/ai-fluency-collector
+configfile: pyproject.toml
+collecting ... collected 20 items
+
+tests/test_scoring_context.py::test_artifact_scoring_context_present PASSED [  5%]
+tests/test_scoring_context.py::test_artifact_scoring_context_feature_branch PASSED [ 10%]
+tests/test_scoring_context.py::test_artifact_scoring_context_default_branch PASSED [ 15%]
+tests/test_scoring_context.py::test_artifact_scoring_context_max_from_signal_feature PASSED [ 20%]
+tests/test_scoring_context.py::test_artifact_scoring_context_max_from_signal_default PASSED [ 25%]
+tests/test_scoring_context.py::test_ci_scoring_context_present PASSED    [ 30%]
+tests/test_scoring_context.py::test_mixed_branches_breakdown PASSED      [ 35%]
+tests/test_scoring_context.py::test_artifact_missing_signals_partial PASSED [ 40%]
+tests/test_scoring_context.py::test_artifact_missing_signals_omitted_when_all_found PASSED [ 45%]
+tests/test_scoring_context.py::test_ci_missing_signals PASSED            [ 50%]
+tests/test_scoring_context.py::test_member_missing_signals_partial PASSED [ 55%]
+tests/test_scoring_context.py::test_member_missing_signals_omitted_when_all_found PASSED [ 60%]
+tests/test_scoring_context.py::test_member_scoring_context_present PASSED [ 65%]
+tests/test_scoring_context.py::test_member_scoring_context_max_all_members PASSED [ 70%]
+tests/test_scoring_context.py::test_review_scoring_context_present PASSED [ 75%]
+tests/test_scoring_context.py::test_pipeline_scoring_context_present PASSED [ 80%]
+tests/test_scoring_context.py::test_coverage_scoring_context_present PASSED [ 85%]
+tests/test_scoring_context.py::test_mr_coauthor_scoring_context_present PASSED [ 90%]
+tests/test_scoring_context.py::test_github_review_scoring_context_present PASSED [ 95%]
+tests/test_scoring_context.py::test_github_artifact_scoring_context_present PASSED [100%]
+
+============================== 20 passed in 0.13s ==============================

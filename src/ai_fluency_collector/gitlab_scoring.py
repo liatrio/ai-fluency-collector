@@ -416,11 +416,21 @@ def calculate_member_scores(
             else 0
         )
         breakdown = evidence  # member fraction already described in evidence
+        missing_signals = list(
+            dict.fromkeys(
+                m["artifact_id"]
+                for m in skill_maps
+                if pattern_member_counts.get(m["artifact_id"], 0) == 0
+            )
+        )
+        ctx: dict = {"breakdown": breakdown, "max_from_this_signal": max_signal}
+        if missing_signals:
+            ctx["missing_signals"] = missing_signals
         signals.append({
             "skill_id": skill_id,
             "score": score,
             "evidence": evidence,
-            "scoring_context": {"breakdown": breakdown, "max_from_this_signal": max_signal},
+            "scoring_context": ctx,
         })
 
     return signals
@@ -540,11 +550,19 @@ def calculate_scores(
             round(min(100.0, max_found_weight / total_weight * 100.0)) if total_weight > 0 else 0
         )
 
+        missing_signals = list(
+            dict.fromkeys(
+                m["artifact_id"] for m in skill_maps if artifact_counts[m["artifact_id"]] == 0
+            )
+        )
+        ctx: dict = {"breakdown": breakdown, "max_from_this_signal": max_signal}
+        if missing_signals:
+            ctx["missing_signals"] = missing_signals
         signals.append({
             "skill_id": skill_id,
             "score": score,
             "evidence": evidence,
-            "scoring_context": {"breakdown": breakdown, "max_from_this_signal": max_signal},
+            "scoring_context": ctx,
         })
 
     return signals

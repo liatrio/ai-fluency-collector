@@ -159,8 +159,9 @@ Every signal emitted by the collector has the following shape:
 |---|---|---|
 | `breakdown` | string | Describes the factors behind the score. For artifact/CI signals: per-artifact branch-type counts (e.g. `"CLAUDE.md: 2/3 on feature branches (weight: 0.8), 1/3 on default branch (weight: 0.5)"`). For rate-based signals: mirrors the evidence string. |
 | `max_from_this_signal` | integer 0–100 | The highest score achievable from the artifacts/signals that were actually found, given the best branch weight observed. For artifact signals this is `≤ 100` when an artifact is only on a default branch or only partially covers the skill's total mapping weight. For rate-based signals this is always `100`. |
+| `missing_signals` | string[] | *(Optional)* Artifact or co-author pattern IDs that map to this skill but were not found in any project or by any member. Present only when at least one contributing signal is absent. Omitted when all contributing signals were detected. Applies to artifact signals (`gitlab-repo-artifacts`), CI pattern signals (`gitlab-ci-config`), and member activity signals (`gitlab-member-activity`). Not present on rate-based or review signals. |
 
-The `scoring_context` field is present on all signals and is intended for UI consumers that need to explain divergence between survey and behavioral scores.
+The `scoring_context` field is present on all signals and is intended for UI consumers that need to explain divergence between survey and behavioral scores. The optional `missing_signals` field enables the UI to render actionable suggestions such as "Adding `.cursorrules` or `.github/copilot-instructions.md` could raise this score toward 100."
 
 ## Scoring Formula
 

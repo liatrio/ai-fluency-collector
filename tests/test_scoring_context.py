@@ -95,7 +95,74 @@ def test_mixed_branches_breakdown():
     assert "weight:" not in breakdown  # no internal weight values
 
 
+def test_artifact_missing_signals_partial():
+    """missing_signals lists artifact IDs absent from all projects when some are missing."""
+    # im-autocomplete maps to claude-md (0.3), cursor (0.3), copilot-instructions (0.3)
+    # Only claude-md is present → cursor and copilot-instructions should be in missing_signals
+    results = [{"claude-md": FEATURE_BRANCH_WEIGHT}]
+    signals = calculate_scores(results, ARTIFACT_SKILL_MAPPINGS)
+    autocomplete = next(s for s in signals if s["skill_id"] == "im-autocomplete")
+    ctx = autocomplete["scoring_context"]
+    assert "missing_signals" in ctx
+    assert "cursor" in ctx["missing_signals"]
+    assert "copilot-instructions" in ctx["missing_signals"]
+    assert "claude-md" not in ctx["missing_signals"]
+
+
+def test_artifact_missing_signals_omitted_when_all_found():
+    """missing_signals is absent when all contributing artifacts are present."""
+    # cq-context maps only to claude-md; if claude-md is found, no missing signals
+    results = [{"claude-md": DEFAULT_BRANCH_WEIGHT}]
+    signals = calculate_scores(results, ARTIFACT_SKILL_MAPPINGS)
+    cq = next(s for s in signals if s["skill_id"] == "cq-context")
+    assert "missing_signals" not in cq["scoring_context"]
+
+
+def test_ci_missing_signals():
+    """CI signals include missing_signals for CI pattern IDs absent from all projects."""
+    # sdlc-security maps to sast-dast (0.4), secret-detection (0.3), dependency-scanning (0.3)
+    # Only sast-dast present → missing_signals should list the two absent CI pattern IDs
+    results = [{"sast-dast": FEATURE_BRANCH_WEIGHT}]
+    signals = calculate_scores(results, CI_SKILL_MAPPINGS)
+    sdlc = next(s for s in signals if s["skill_id"] == "sdlc-security")
+    ctx = sdlc["scoring_context"]
+    assert "missing_signals" in ctx
+    assert "secret-detection" in ctx["missing_signals"]
+    assert "dependency-scanning" in ctx["missing_signals"]
+    assert "sast-dast" not in ctx["missing_signals"]
+
+
 # ── calculate_member_scores ───────────────────────────────────────────────────
+
+
+def test_member_missing_signals_partial():
+    """missing_signals lists co-author pattern IDs with zero members when some are absent."""
+    from ai_fluency_collector.scanners.gitlab_member_scanner import MemberResult
+
+    # im-autocomplete maps to coauthor-copilot (0.5) and coauthor-cursor (0.3)
+    # Only coauthor-copilot triggered → coauthor-cursor should appear in missing_signals
+    results = [
+        MemberResult("alice", repos_discovered=1, ai_coauthor_counts={"coauthor-copilot": 3}),
+    ]
+    signals = calculate_member_scores(results, MEMBER_SKILL_MAPPINGS)
+    autocomplete = next(s for s in signals if s["skill_id"] == "im-autocomplete")
+    ctx = autocomplete["scoring_context"]
+    assert "missing_signals" in ctx
+    assert "coauthor-cursor" in ctx["missing_signals"]
+    assert "coauthor-copilot" not in ctx["missing_signals"]
+
+
+def test_member_missing_signals_omitted_when_all_found():
+    """missing_signals is absent when all contributing co-author patterns are found."""
+    from ai_fluency_collector.scanners.gitlab_member_scanner import MemberResult
+
+    # im-cli-agent maps only to coauthor-claude; if found, no missing signals
+    results = [
+        MemberResult("alice", repos_discovered=1, ai_coauthor_counts={"coauthor-claude": 5}),
+    ]
+    signals = calculate_member_scores(results, MEMBER_SKILL_MAPPINGS)
+    cli = next(s for s in signals if s["skill_id"] == "im-cli-agent")
+    assert "missing_signals" not in cli["scoring_context"]
 
 
 def test_member_scoring_context_present():
