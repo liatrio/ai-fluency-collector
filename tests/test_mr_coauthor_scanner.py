@@ -4,8 +4,11 @@ import pytest
 import responses
 
 from ai_fluency_collector.gitlab_client import GitLabClient
-from ai_fluency_collector.scanners.review_scanner import ReviewScanner
-from ai_fluency_collector.scoring import MR_COAUTHOR_SKILL_MAPPINGS, calculate_mr_coauthor_scores
+from ai_fluency_collector.gitlab_scoring import (
+    MR_COAUTHOR_SKILL_MAPPINGS,
+    calculate_mr_coauthor_scores,
+)
+from ai_fluency_collector.scanners.gitlab_review_scanner import ReviewScanner
 
 BASE = "https://gitlab.com/api/v4"
 MR_SEARCH = f"{BASE}/merge_requests"
@@ -204,7 +207,7 @@ def test_evidence_includes_per_tool_breakdown():
 
 
 def _metrics(ai_rate, agentic_rate, total=5):
-    from ai_fluency_collector.scanners.review_scanner import ReviewMetrics
+    from ai_fluency_collector.scanners.gitlab_review_scanner import ReviewMetrics
 
     return ReviewMetrics(
         lgtm_rate=None,

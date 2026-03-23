@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ai_fluency_collector.scoring import ARTIFACT_SKILL_MAPPINGS, calculate_scores
+from ai_fluency_collector.gitlab_scoring import ARTIFACT_SKILL_MAPPINGS, calculate_scores
 
 
 def test_single_artifact_single_skill():

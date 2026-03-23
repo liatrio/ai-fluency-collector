@@ -5,8 +5,8 @@ from urllib.parse import quote
 import responses
 
 from ai_fluency_collector.gitlab_client import GitLabClient
-from ai_fluency_collector.scanners.ci_scanner import CIScanner, CoverageResult
-from ai_fluency_collector.scoring import COVERAGE_SKILL_MAPPINGS, calculate_coverage_scores
+from ai_fluency_collector.gitlab_scoring import COVERAGE_SKILL_MAPPINGS, calculate_coverage_scores
+from ai_fluency_collector.scanners.gitlab_ci_scanner import CIScanner, CoverageResult
 
 BASE = "https://gitlab.com/api/v4"
 PROJECT = "my-group/my-project"

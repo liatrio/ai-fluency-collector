@@ -54,7 +54,7 @@ score = clamp(round(50 + delta * 10), 0, 100)
 
 **Evidence format:** "Test coverage: 74% (+3.0% from prior period, N=3 projects)"
 
-Mappings live in `src/ai_fluency_collector/scoring.py` as `COVERAGE_SKILL_MAPPINGS`.
+Mappings live in `src/ai_fluency_collector/gitlab_scoring.py` as `COVERAGE_SKILL_MAPPINGS`.
 
 ## CI Pipeline Metrics
 
@@ -69,7 +69,7 @@ Computed from GitLab pipeline history for the survey period. Scores are team-lev
 
 **Evidence format**: "78% of pipelines passed on first attempt (N=47 pipelines)"
 
-Mappings live in `src/ai_fluency_collector/scoring.py` as `CI_PIPELINE_SKILL_MAPPINGS`.
+Mappings live in `src/ai_fluency_collector/gitlab_scoring.py` as `CI_PIPELINE_SKILL_MAPPINGS`.
 
 ## Member Activity Mappings
 
@@ -103,7 +103,7 @@ Computed from commit messages in team-authored merged MRs for the survey period.
 
 **Evidence format**: "34% of team-authored merged MRs have AI co-author tags (Claude: 22%, Copilot: 12%)"
 
-Mappings live in `src/ai_fluency_collector/scoring.py` as `MR_COAUTHOR_SKILL_MAPPINGS`.
+Mappings live in `src/ai_fluency_collector/gitlab_scoring.py` as `MR_COAUTHOR_SKILL_MAPPINGS`.
 
 ## MR Review Behavioral Mappings
 
@@ -129,6 +129,38 @@ Artifacts and CI patterns are weighted by branch type:
 | Active feature branch | 0.8 | Indicates current, active AI tool adoption |
 
 For each artifact/pattern per project, the **highest weight** across all active branches is used. For example, if `CLAUDE.md` exists on both `main` (0.5) and `feat/add-ai` (0.8), the weight is 0.8.
+
+## Signal Schema
+
+Every signal emitted by the collector has the following shape:
+
+```json
+{
+  "skill_id": "cq-context",
+  "score": 40,
+  "evidence": "CLAUDE.md found in 1/3 projects",
+  "scoring_context": {
+    "breakdown": "CLAUDE.md: 1/3 on default branch (weight: 0.5)",
+    "max_from_this_signal": 50
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `skill_id` | string | Skill identifier matching the ai-fluency skill tree |
+| `score` | integer 0–100 | Computed score for this skill |
+| `evidence` | string | Human-readable description of what was found |
+| `scoring_context` | object | Structured context explaining how the score was derived |
+
+### `scoring_context` fields
+
+| Field | Type | Description |
+|---|---|---|
+| `breakdown` | string | Describes the factors behind the score. For artifact/CI signals: per-artifact branch-type counts (e.g. `"CLAUDE.md: 2/3 on feature branches (weight: 0.8), 1/3 on default branch (weight: 0.5)"`). For rate-based signals: mirrors the evidence string. |
+| `max_from_this_signal` | integer 0–100 | The highest score achievable from the artifacts/signals that were actually found, given the best branch weight observed. For artifact signals this is `≤ 100` when an artifact is only on a default branch or only partially covers the skill's total mapping weight. For rate-based signals this is always `100`. |
+
+The `scoring_context` field is present on all signals and is intended for UI consumers that need to explain divergence between survey and behavioral scores.
 
 ## Scoring Formula
 
@@ -221,7 +253,7 @@ Mappings live in `src/ai_fluency_collector/github_scoring.py` as `GITHUB_REVIEW_
 
 ## Modifying Weights and Mappings
 
-All GitLab mappings live in `src/ai_fluency_collector/scoring.py`. GitHub review mappings live in `src/ai_fluency_collector/github_scoring.py`. GitHub artifact scoring logic is in `src/ai_fluency_collector/scanners/github_artifact_scanner.py`.
+All GitLab mappings live in `src/ai_fluency_collector/gitlab_scoring.py`. GitHub review mappings live in `src/ai_fluency_collector/github_scoring.py`. GitHub artifact scoring logic is in `src/ai_fluency_collector/scanners/github_artifact_scanner.py`.
 
 GitLab data structures:
 
@@ -253,7 +285,7 @@ ARTIFACT_SKILL_MAPPINGS: list[dict] = [
 
 ### To add a new artifact type
 
-1. Add the artifact definition to `ARTIFACT_DEFINITIONS` in `src/ai_fluency_collector/scanners/artifact_scanner.py`:
+1. Add the artifact definition to `ARTIFACT_DEFINITIONS` in `src/ai_fluency_collector/scanners/gitlab_artifact_scanner.py`:
    ```python
    {
        "id": "new-artifact",
@@ -261,19 +293,19 @@ ARTIFACT_SKILL_MAPPINGS: list[dict] = [
        "checks": [("file", "path/to/file")],
    }
    ```
-2. Add mapping entries to `ARTIFACT_SKILL_MAPPINGS` in `scoring.py`
+2. Add mapping entries to `ARTIFACT_SKILL_MAPPINGS` in `gitlab_scoring.py`
 3. Update this document to reflect the new mappings
 
 ### To add a new CI pattern
 
-1. Add detection logic in `src/ai_fluency_collector/scanners/ci_scanner.py`
+1. Add detection logic in `src/ai_fluency_collector/scanners/gitlab_ci_scanner.py`
 2. Add the pattern ID to `CI_PATTERN_IDS`
-3. Add mapping entries to `CI_SKILL_MAPPINGS` in `scoring.py`
+3. Add mapping entries to `CI_SKILL_MAPPINGS` in `gitlab_scoring.py`
 4. Update this document to reflect the new mappings
 
 ### To add a new co-author pattern
 
-1. Add a pattern definition to `AI_COAUTHOR_PATTERNS` in `src/ai_fluency_collector/scanners/member_scanner.py`:
+1. Add a pattern definition to `AI_COAUTHOR_PATTERNS` in `src/ai_fluency_collector/scanners/gitlab_member_scanner.py`:
    ```python
    {
        "id": "coauthor-new-tool",
@@ -281,14 +313,14 @@ ARTIFACT_SKILL_MAPPINGS: list[dict] = [
        "pattern": re.compile(r"co-authored-by:.*new.?tool", re.IGNORECASE),
    }
    ```
-2. Add mapping entries to `MEMBER_SKILL_MAPPINGS` in `scoring.py`
+2. Add mapping entries to `MEMBER_SKILL_MAPPINGS` in `gitlab_scoring.py`
 3. Update this document to reflect the new mappings
 
 ### To add a new review metric
 
-1. Add metric computation to `ReviewScanner.scan()` in `src/ai_fluency_collector/scanners/review_scanner.py`
+1. Add metric computation to `ReviewScanner.scan()` in `src/ai_fluency_collector/scanners/gitlab_review_scanner.py`
 2. Populate `metrics.evidence[new_metric_key]` with a team-level evidence string
-3. Add a mapping entry to `REVIEW_SKILL_MAPPINGS` in `scoring.py`:
+3. Add a mapping entry to `REVIEW_SKILL_MAPPINGS` in `gitlab_scoring.py`:
    ```python
    "new_metric_key": [
        {"skill_id": "target-skill-id", "score_fn": lambda rate: round(rate * 100)},

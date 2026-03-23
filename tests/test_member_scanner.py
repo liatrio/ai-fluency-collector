@@ -4,7 +4,7 @@ import pytest
 import responses
 
 from ai_fluency_collector.gitlab_client import GitLabClient, GitLabUserNotFoundError
-from ai_fluency_collector.scanners.member_scanner import MemberScanner
+from ai_fluency_collector.scanners.gitlab_member_scanner import MemberScanner
 
 BASE = "https://gitlab.com/api/v4"
 

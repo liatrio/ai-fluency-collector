@@ -3,7 +3,7 @@ from __future__ import annotations
 import responses
 
 from ai_fluency_collector.gitlab_client import GitLabClient
-from ai_fluency_collector.scanners.review_scanner import (
+from ai_fluency_collector.scanners.gitlab_review_scanner import (
     ReviewScanner,
     _period_to_date_range,
 )

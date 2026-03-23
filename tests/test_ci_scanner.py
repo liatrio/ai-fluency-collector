@@ -7,11 +7,11 @@ import responses
 import yaml
 
 from ai_fluency_collector.gitlab_client import GitLabClient
-from ai_fluency_collector.scanners.artifact_scanner import (
+from ai_fluency_collector.scanners.gitlab_artifact_scanner import (
     DEFAULT_BRANCH_WEIGHT,
     FEATURE_BRANCH_WEIGHT,
 )
-from ai_fluency_collector.scanners.ci_scanner import CI_PATTERN_IDS, CIScanner
+from ai_fluency_collector.scanners.gitlab_ci_scanner import CI_PATTERN_IDS, CIScanner
 
 BASE = "https://gitlab.com/api/v4"
 PROJECT = "my-group/my-project"
