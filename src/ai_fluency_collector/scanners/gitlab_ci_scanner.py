@@ -287,10 +287,12 @@ class CIScanner:
         client: GitLabClient,
         active_days: int = 90,
         ci_signals: dict[str, list[str]] | None = None,
+        reference_date: date | None = None,
     ) -> None:
         self.client = client
         self.active_days = active_days
         self.ci_signals = ci_signals or {}
+        self.reference_date = reference_date
 
     def _parse_yaml(self, content: str) -> dict | None:
         """Parse YAML content, returning None on failure."""
@@ -365,7 +367,9 @@ class CIScanner:
             _get_active_branches,
         )
 
-        active_branches = _get_active_branches(self.client, project_path, self.active_days)
+        active_branches = _get_active_branches(
+            self.client, project_path, self.active_days, self.reference_date
+        )
 
         if not active_branches:
             active_branches = [{"name": "HEAD", "weight": DEFAULT_BRANCH_WEIGHT}]

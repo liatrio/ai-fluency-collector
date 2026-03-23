@@ -1,0 +1,38 @@
+Type: test
+Command: python -m pytest tests/test_member_scanner.py tests/test_artifact_scanner.py -v
+Expected: All 22 tests pass including 2 new tests
+Timestamp: 2026-03-23T00:00:00Z
+
+OUTPUT:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0
+rootdir: /Users/craigkilpatrick/liatrio/projects/ai-fluency-collector
+configfile: pyproject.toml
+collected 22 items
+
+tests/test_member_scanner.py::test_member_lookup_by_username PASSED
+tests/test_member_scanner.py::test_member_not_found_raises_error PASSED
+tests/test_member_scanner.py::test_discover_owned_projects PASSED
+tests/test_member_scanner.py::test_discover_pushed_projects PASSED
+tests/test_member_scanner.py::test_team_projects_excluded PASSED
+tests/test_member_scanner.py::test_deduplication_owned_and_pushed PASSED
+tests/test_member_scanner.py::test_detect_claude_coauthor PASSED
+tests/test_member_scanner.py::test_detect_copilot_coauthor PASSED
+tests/test_member_scanner.py::test_detect_cursor_coauthor PASSED
+tests/test_member_scanner.py::test_no_activity_returns_empty PASSED
+tests/test_member_scanner.py::test_scan_all_members PASSED
+tests/test_member_scanner.py::test_since_date_passed_directly_to_get_project_commits PASSED
+tests/test_artifact_scanner.py::test_all_artifacts_detected_default_branch PASSED
+tests/test_artifact_scanner.py::test_no_artifacts_found PASSED
+tests/test_artifact_scanner.py::test_feature_branch_artifact_higher_weight PASSED
+tests/test_artifact_scanner.py::test_artifact_on_both_branches_takes_highest PASSED
+tests/test_artifact_scanner.py::test_stale_branch_excluded PASSED
+tests/test_artifact_scanner.py::test_or_logic_mcp_json_fallback PASSED
+tests/test_artifact_scanner.py::test_project_access_error_403 PASSED
+tests/test_artifact_scanner.py::test_no_active_branches_falls_back_to_head PASSED
+tests/test_artifact_scanner.py::test_project_not_found_raises_error PASSED
+tests/test_artifact_scanner.py::test_get_active_branches_uses_reference_date_not_today PASSED
+
+============================== 22 passed in 0.22s ==============================
+
+Status: PASS

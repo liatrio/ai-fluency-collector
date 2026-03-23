@@ -1,0 +1,38 @@
+PROOF ARTIFACT: test
+Command: .venv/bin/pytest tests/test_member_scanner.py tests/test_timeout_and_rate_limit.py -v
+Expected: All pass, including new tests for scan_all_members parallelism and get_jobs max_pages
+Timestamp: 2026-03-23T12:00:00Z
+---
+============================= test session starts ==============================
+platform darwin -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0
+cachedir: .pytest_cache
+rootdir: /Users/craigkilpatrick/liatrio/projects/ai-fluency-collector
+configfile: pyproject.toml
+collected 22 items
+
+tests/test_member_scanner.py::test_member_lookup_by_username PASSED      [  4%]
+tests/test_member_scanner.py::test_member_not_found_raises_error PASSED  [  9%]
+tests/test_member_scanner.py::test_discover_owned_projects PASSED        [ 13%]
+tests/test_member_scanner.py::test_discover_pushed_projects PASSED       [ 18%]
+tests/test_member_scanner.py::test_team_projects_excluded PASSED         [ 22%]
+tests/test_member_scanner.py::test_deduplication_owned_and_pushed PASSED [ 27%]
+tests/test_member_scanner.py::test_detect_claude_coauthor PASSED         [ 31%]
+tests/test_member_scanner.py::test_detect_copilot_coauthor PASSED        [ 36%]
+tests/test_member_scanner.py::test_detect_cursor_coauthor PASSED         [ 40%]
+tests/test_member_scanner.py::test_no_activity_returns_empty PASSED      [ 45%]
+tests/test_member_scanner.py::test_scan_all_members PASSED               [ 50%]
+tests/test_member_scanner.py::test_since_date_passed_directly_to_get_project_commits PASSED [ 54%]
+tests/test_member_scanner.py::test_scan_all_members_calls_scan_member_for_each_username PASSED [ 59%]
+tests/test_timeout_and_rate_limit.py::test_timeout_raises_gitlab_timeout_error PASSED [ 63%]
+tests/test_timeout_and_rate_limit.py::test_timeout_error_message_includes_advice PASSED [ 68%]
+tests/test_timeout_and_rate_limit.py::test_rate_limit_with_reset_header PASSED [ 72%]
+tests/test_timeout_and_rate_limit.py::test_rate_limit_without_reset_header PASSED [ 77%]
+tests/test_timeout_and_rate_limit.py::test_rate_limit_on_paginated_endpoint PASSED [ 81%]
+tests/test_timeout_and_rate_limit.py::test_default_timeout_is_configured PASSED [ 86%]
+tests/test_timeout_and_rate_limit.py::test_custom_timeout_respected PASSED [ 90%]
+tests/test_timeout_and_rate_limit.py::test_get_jobs_stops_after_max_pages PASSED [ 95%]
+tests/test_timeout_and_rate_limit.py::test_get_jobs_default_max_pages_is_five PASSED [100%]
+
+============================== 22 passed in 0.12s ==============================
+
+Status: PASS

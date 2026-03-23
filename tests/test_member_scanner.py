@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 import responses
 
 from ai_fluency_collector.gitlab_client import GitLabClient, GitLabUserNotFoundError
-from ai_fluency_collector.scanners.gitlab_member_scanner import MemberScanner
+from ai_fluency_collector.scanners.gitlab_member_scanner import MemberResult, MemberScanner
 
 BASE = "https://gitlab.com/api/v4"
 
@@ -83,7 +85,7 @@ def test_member_lookup_by_username():
     _register_user_events(101, [])
 
     client = GitLabClient("test-token")
-    scanner = MemberScanner(client, team_projects=[])
+    scanner = MemberScanner(client, team_projects=[], since_date="2026-01-01")
     result = scanner.scan_member("alice")
     assert result.username == "alice"
     assert result.repos_discovered == 0
@@ -96,7 +98,7 @@ def test_member_not_found_raises_error():
     _register_user_not_found("unknown_user")
 
     client = GitLabClient("test-token")
-    scanner = MemberScanner(client, team_projects=[])
+    scanner = MemberScanner(client, team_projects=[], since_date="2026-01-01")
     with pytest.raises(GitLabUserNotFoundError, match="unknown_user"):
         scanner.scan_member("unknown_user")
 
@@ -115,7 +117,7 @@ def test_discover_owned_projects():
     _register_commits(1, [])
 
     client = GitLabClient("test-token")
-    scanner = MemberScanner(client, team_projects=[])
+    scanner = MemberScanner(client, team_projects=[], since_date="2026-01-01")
     result = scanner.scan_member("alice")
     assert result.repos_discovered == 1
 
@@ -137,7 +139,7 @@ def test_discover_pushed_projects():
     _register_commits(2, [])
 
     client = GitLabClient("test-token")
-    scanner = MemberScanner(client, team_projects=[])
+    scanner = MemberScanner(client, team_projects=[], since_date="2026-01-01")
     result = scanner.scan_member("alice")
     assert result.repos_discovered == 1
 
@@ -157,7 +159,7 @@ def test_team_projects_excluded():
     _register_commits(2, [])
 
     client = GitLabClient("test-token")
-    scanner = MemberScanner(client, team_projects=["team/listed-project"])
+    scanner = MemberScanner(client, team_projects=["team/listed-project"], since_date="2026-01-01")
     result = scanner.scan_member("alice")
     assert result.repos_discovered == 1  # Only personal, not team project
 
@@ -182,7 +184,7 @@ def test_deduplication_owned_and_pushed():
     _register_commits(1, [])
 
     client = GitLabClient("test-token")
-    scanner = MemberScanner(client, team_projects=[])
+    scanner = MemberScanner(client, team_projects=[], since_date="2026-01-01")
     result = scanner.scan_member("alice")
     assert result.repos_discovered == 1
 
@@ -202,7 +204,7 @@ def test_detect_claude_coauthor():
     )
 
     client = GitLabClient("test-token")
-    scanner = MemberScanner(client, team_projects=[])
+    scanner = MemberScanner(client, team_projects=[], since_date="2026-01-01")
     result = scanner.scan_member("alice")
     assert result.ai_coauthor_counts.get("coauthor-claude") == 1
 
@@ -221,7 +223,7 @@ def test_detect_copilot_coauthor():
     )
 
     client = GitLabClient("test-token")
-    scanner = MemberScanner(client, team_projects=[])
+    scanner = MemberScanner(client, team_projects=[], since_date="2026-01-01")
     result = scanner.scan_member("bob")
     assert result.ai_coauthor_counts.get("coauthor-copilot") == 1
 
@@ -240,7 +242,7 @@ def test_detect_cursor_coauthor():
     )
 
     client = GitLabClient("test-token")
-    scanner = MemberScanner(client, team_projects=[])
+    scanner = MemberScanner(client, team_projects=[], since_date="2026-01-01")
     result = scanner.scan_member("carol")
     assert result.ai_coauthor_counts.get("coauthor-cursor") == 1
 
@@ -253,7 +255,7 @@ def test_no_activity_returns_empty():
     _register_user_events(104, [])
 
     client = GitLabClient("test-token")
-    scanner = MemberScanner(client, team_projects=[])
+    scanner = MemberScanner(client, team_projects=[], since_date="2026-01-01")
     result = scanner.scan_member("quiet")
     assert result.repos_discovered == 0
     assert result.ai_coauthor_counts == {}
@@ -272,8 +274,41 @@ def test_scan_all_members():
     _register_user_events(102, [])
 
     client = GitLabClient("test-token")
-    scanner = MemberScanner(client, team_projects=[])
+    scanner = MemberScanner(client, team_projects=[], since_date="2026-01-01")
     results = scanner.scan_all_members(["alice", "bob"])
     assert len(results) == 2
     assert results[0].username == "alice"
     assert results[1].username == "bob"
+
+
+def test_since_date_passed_directly_to_get_project_commits():
+    """MemberScanner passes since_date directly to get_project_commits(), not today-relative."""
+    mock_client = MagicMock()
+    mock_client.get_user.return_value = {"id": 101}
+    mock_client.get_user_projects.return_value = [{"id": 1, "path_with_namespace": "alice/proj"}]
+    mock_client.get_user_events.return_value = []
+    mock_client.get_project_commits.return_value = []
+
+    since = "2026-01-06"
+    scanner = MemberScanner(mock_client, team_projects=[], since_date=since)
+    scanner.scan_member("alice")
+
+    mock_client.get_project_commits.assert_called_once_with(1, author="alice", since=since)
+
+
+def test_scan_all_members_calls_scan_member_for_each_username():
+    """scan_all_members() scans each username and returns one MemberResult per member."""
+    usernames = ["alice", "bob", "carol"]
+
+    def _fake_scan_member(username: str) -> MemberResult:
+        return MemberResult(username=username, repos_discovered=0)
+
+    mock_client = MagicMock()
+    scanner = MemberScanner(mock_client, team_projects=[], since_date="2026-01-01")
+    scanner.scan_member = MagicMock(side_effect=_fake_scan_member)
+
+    results = scanner.scan_all_members(usernames)
+
+    assert len(results) == 3
+    assert [r.username for r in results] == usernames
+    assert scanner.scan_member.call_count == 3

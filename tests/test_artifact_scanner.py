@@ -11,6 +11,7 @@ from ai_fluency_collector.scanners.gitlab_artifact_scanner import (
     DEFAULT_BRANCH_WEIGHT,
     FEATURE_BRANCH_WEIGHT,
     ArtifactScanner,
+    _get_active_branches,
 )
 
 BASE = "https://gitlab.com/api/v4"
@@ -289,3 +290,30 @@ def test_project_not_found_raises_error():
     scanner = ArtifactScanner(client)
     with pytest.raises(GitLabAccessError, match="not found"):
         scanner.scan_project(PROJECT)
+
+
+@responses.activate
+def test_get_active_branches_uses_reference_date_not_today():
+    """_get_active_branches() uses reference_date for cutoff, not date.today()."""
+    # Use a fixed reference date in the past so we can control the 90-day window.
+    # Reference: 2026-01-12 → cutoff = 2025-10-14
+    reference = date(2026, 1, 12)
+
+    # A branch committed on 2025-10-20 is within 90 days of 2026-01-12
+    within_window = "2025-10-20T00:00:00.000+00:00"
+    # A branch committed on 2025-10-01 is outside 90 days of 2026-01-12
+    outside_window = "2025-10-01T00:00:00.000+00:00"
+
+    branches = [
+        {"name": "recent", "default": False, "commit": {"committed_date": within_window}},
+        {"name": "stale", "default": False, "commit": {"committed_date": outside_window}},
+    ]
+    responses.add(responses.GET, _branches_url(), json=branches, status=200)
+    responses.add(responses.GET, _branches_url(), json=[], status=200)
+
+    client = GitLabClient("test-token")
+    active = _get_active_branches(client, PROJECT, reference_date=reference)
+
+    active_names = [b["name"] for b in active]
+    assert "recent" in active_names
+    assert "stale" not in active_names
