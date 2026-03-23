@@ -1,0 +1,33 @@
+Type: cli
+Command: .venv/bin/python -c "from ai_fluency_collector.output import build_output; import json; ..."
+Expected: JSON output contains source_id "gitlab-mr" with im-inline-editing AND im-supervised-agent signals for coding time
+Timestamp: 2026-03-23T00:00:00Z
+
+{
+  "team_code": "test",
+  "survey_period": "2026-W12",
+  "sources": [
+    {
+      "source_id": "gitlab-mr",
+      "signals": [
+        {
+          "skill_id": "im-supervised-agent",
+          "score": 80,
+          "evidence": "PR size (AI-attributed): 300 median lines changed (N=3 MRs)"
+        },
+        {
+          "skill_id": "im-inline-editing",
+          "score": 85,
+          "evidence": "Coding time (AI-attributed): 5.0h median first commit to MR open (N=3 MRs)"
+        },
+        {
+          "skill_id": "im-supervised-agent",
+          "score": 85,
+          "evidence": "Coding time (AI-attributed): 5.0h median first commit to MR open (N=3 MRs)"
+        }
+      ]
+    }
+  ]
+}
+
+Status: PASS

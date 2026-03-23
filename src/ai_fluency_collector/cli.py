@@ -25,12 +25,13 @@ from ai_fluency_collector.gitlab_scoring import (
     COVERAGE_SKILL_MAPPINGS,
     MEMBER_SKILL_MAPPINGS,
     MR_COAUTHOR_SKILL_MAPPINGS,
+    MR_CODING_TIME_SKILL_MAPPINGS,
     MR_SIZE_SKILL_MAPPINGS,
     REVIEW_SKILL_MAPPINGS,
     calculate_coverage_scores,
     calculate_member_scores,
     calculate_mr_coauthor_scores,
-    calculate_mr_size_scores,
+    calculate_mr_signals,
     calculate_pipeline_scores,
     calculate_review_scores,
     calculate_scores,
@@ -470,8 +471,10 @@ def scan(
         click.echo(f"  → {len(mr_coauthor_signals)} MR co-author signals detected")
 
         mr_metrics = mr_scanner.scan(effective_members, week)
-        mr_signals = calculate_mr_size_scores(mr_metrics, MR_SIZE_SKILL_MAPPINGS)
-        click.echo(f"  → {len(mr_signals)} MR size signals detected")
+        mr_signals = calculate_mr_signals(
+            mr_metrics, MR_SIZE_SKILL_MAPPINGS, MR_CODING_TIME_SKILL_MAPPINGS
+        )
+        click.echo(f"  → {len(mr_signals)} MR signals detected")
 
         week_member_signals = member_signals + mr_coauthor_signals
 

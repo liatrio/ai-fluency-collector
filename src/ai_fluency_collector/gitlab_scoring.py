@@ -96,9 +96,71 @@ MR_SIZE_SKILL_MAPPINGS: dict[str, list[dict]] = {
     ],
 }
 
+# MR coding time → skill mappings (source: gitlab-mr).
+# score_fn takes the median hours (float) and returns an int score 0–100.
+def _coding_time_score(median_hours: float) -> int:
+    if median_hours < 2:
+        return 100
+    if median_hours < 8:
+        return 85
+    if median_hours < 24:
+        return 65
+    if median_hours < 72:
+        return 40
+    return 15
 
+
+MR_CODING_TIME_SKILL_MAPPINGS: dict[str, list[dict]] = {
+    "coding_time_median": [
+        {"skill_id": "im-inline-editing", "score_fn": _coding_time_score},
+        {"skill_id": "im-supervised-agent", "score_fn": _coding_time_score},
+    ],
+}
+
+
+def calculate_mr_signals(metrics, size_mappings: dict, coding_time_mappings: dict) -> list[dict]:
+    """Calculate all gitlab-mr skill scores from MRMetrics.
+
+    Args:
+        metrics: MRMetrics object from MRScanner.scan().
+        size_mappings: MR_SIZE_SKILL_MAPPINGS dict.
+        coding_time_mappings: MR_CODING_TIME_SKILL_MAPPINGS dict.
+
+    Returns:
+        Combined list of {skill_id, score, evidence} dicts for all MR signals.
+    """
+    if metrics is None:
+        return []
+
+    all_mappings = {**size_mappings, **coding_time_mappings}
+    metric_values = {
+        "pr_size_median": metrics.pr_size_median,
+        "coding_time_median": metrics.coding_time_median,
+    }
+
+    signals: list[dict] = []
+    for metric_key, skill_maps in all_mappings.items():
+        value = metric_values.get(metric_key)
+        if value is None:
+            continue
+        for m in skill_maps:
+            score = m["score_fn"](value)
+            if score <= 0:
+                continue
+            evidence = metrics.evidence.get(metric_key, "detected")
+            signals.append({
+                "skill_id": m["skill_id"],
+                "score": score,
+                "evidence": evidence,
+                "scoring_context": _rate_context(evidence),
+            })
+
+    return signals
+
+
+# Keep backward-compatible alias used by CLI (T01 wired this name)
 def calculate_mr_size_scores(metrics, mappings: dict) -> list[dict]:
-    """Calculate skill scores from MR size metrics.
+    """Calculate skill scores from MR size metrics only.
 
     Args:
         metrics: MRMetrics object from MRScanner.scan().
@@ -110,13 +172,9 @@ def calculate_mr_size_scores(metrics, mappings: dict) -> list[dict]:
     if metrics is None or metrics.pr_size_median is None:
         return []
 
-    metric_values = {
-        "pr_size_median": metrics.pr_size_median,
-    }
-
     signals: list[dict] = []
     for metric_key, skill_maps in mappings.items():
-        value = metric_values.get(metric_key)
+        value = getattr(metrics, metric_key, None)
         if value is None:
             continue
         for m in skill_maps:
