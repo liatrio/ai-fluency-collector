@@ -116,6 +116,35 @@ def test_mr_with_cursor_tag_is_agentic():
 
 
 @responses.activate
+def test_multiple_claude_commits_in_one_mr_counts_as_one():
+    """MR with multiple Claude-co-authored commits still counts as 1 MR, not N commits."""
+    _register_authored_mrs([_mr(1)])
+    _register_commits(
+        PROJECT_ID,
+        1,
+        [
+            _commit("fix A\n\nCo-Authored-By: Claude <noreply@anthropic.com>"),
+            _commit("fix B\n\nCo-Authored-By: Claude <noreply@anthropic.com>"),
+            _commit("fix C\n\nCo-Authored-By: Claude <noreply@anthropic.com>"),
+        ],
+    )
+    _register_notes(PROJECT_ID, 1)
+    _register_no_reviewed_mrs()
+
+    client = GitLabClient("test-token")
+    scanner = ReviewScanner(client)
+    metrics = scanner.scan(["alice"], PERIOD)
+
+    # 1 MR out of 1 total → 100%, not 300%
+    assert metrics.mr_ai_coauthor_rate == 1.0
+    assert "100%" in metrics.evidence.get("mr_ai_coauthor_rate", "")
+    # Per-tool breakdown must also be ≤ 100%
+    evidence = metrics.evidence.get("mr_ai_coauthor_rate", "")
+    assert "300%" not in evidence
+    assert "200%" not in evidence
+
+
+@responses.activate
 def test_mr_without_ai_tags():
     """MR with no AI co-author tags → both rates = 0.0."""
     _register_authored_mrs([_mr(1)])
