@@ -6,7 +6,7 @@ import pytest
 import responses
 
 from ai_fluency_collector.gitlab_client import GitLabClient, GitLabUserNotFoundError
-from ai_fluency_collector.scanners.gitlab_member_scanner import MemberScanner
+from ai_fluency_collector.scanners.gitlab_member_scanner import MemberResult, MemberScanner
 
 BASE = "https://gitlab.com/api/v4"
 
@@ -294,3 +294,21 @@ def test_since_date_passed_directly_to_get_project_commits():
     scanner.scan_member("alice")
 
     mock_client.get_project_commits.assert_called_once_with(1, author="alice", since=since)
+
+
+def test_scan_all_members_calls_scan_member_for_each_username():
+    """scan_all_members() scans each username and returns one MemberResult per member."""
+    usernames = ["alice", "bob", "carol"]
+
+    def _fake_scan_member(username: str) -> MemberResult:
+        return MemberResult(username=username, repos_discovered=0)
+
+    mock_client = MagicMock()
+    scanner = MemberScanner(mock_client, team_projects=[], since_date="2026-01-01")
+    scanner.scan_member = MagicMock(side_effect=_fake_scan_member)
+
+    results = scanner.scan_all_members(usernames)
+
+    assert len(results) == 3
+    assert [r.username for r in results] == usernames
+    assert scanner.scan_member.call_count == 3

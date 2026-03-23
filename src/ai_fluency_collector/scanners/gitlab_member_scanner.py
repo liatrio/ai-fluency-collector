@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from ai_fluency_collector.gitlab_client import GitLabClient
@@ -108,8 +109,7 @@ class MemberScanner:
         return result
 
     def scan_all_members(self, usernames: list[str]) -> list[MemberResult]:
-        """Scan all team members. Raises on user not found."""
-        results: list[MemberResult] = []
-        for username in usernames:
-            results.append(self.scan_member(username))
+        """Scan all team members concurrently. Raises on user not found."""
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(self.scan_member, usernames))
         return results

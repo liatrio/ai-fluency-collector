@@ -458,11 +458,18 @@ class GitLabClient:
         project_path: str,
         scope: str = "success",
         updated_after: str | None = None,
+        max_pages: int = 5,
     ) -> list[dict]:
         """Get CI jobs for a project, optionally filtered by scope and date.
 
         Returns list of job dicts; includes 'coverage' field when the job
         has a coverage regex configured and GitLab parsed a value from the log.
+
+        Args:
+            project_path: GitLab project path (e.g. 'group/project').
+            scope: Job scope filter (e.g. 'success').
+            updated_after: ISO date string to filter jobs updated after.
+            max_pages: Maximum number of pages to fetch (default 5, i.e. 500 jobs).
         """
         encoded_project = self._encode_project(project_path)
         url = self._api_url(f"/projects/{encoded_project}/jobs")
@@ -471,7 +478,7 @@ class GitLabClient:
             params["updated_after"] = updated_after
         results: list[dict] = []
         page = 1
-        while True:
+        while page <= max_pages:
             params["page"] = page
             resp = self._get(url, params=params, context=f"listing jobs for '{project_path}'")
             _check_server_error(resp, f"listing jobs for '{project_path}'")
