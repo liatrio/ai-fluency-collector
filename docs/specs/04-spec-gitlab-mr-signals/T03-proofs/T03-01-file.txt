@@ -1,0 +1,8 @@
+Type: file
+Command: grep "gitlab-mr" CLAUDE.md
+Expected: gitlab-mr listed in source_id constraints
+Timestamp: 2026-03-23T00:00:00Z
+
+- `source_id` values must be exactly: `gitlab-repo-artifacts`, `gitlab-ci-config`, `gitlab-member-activity`, `gitlab-review-signals`, `gitlab-mr`, `github-repo-artifacts`, `github-review-signals`
+
+Status: PASS

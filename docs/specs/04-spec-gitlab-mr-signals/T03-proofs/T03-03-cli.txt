@@ -1,0 +1,10 @@
+Type: cli
+Command: .venv/bin/python -c "from ai_fluency_collector.output import build_output; data = build_output('t','2026-W01',[],[],mr_signals=[{'skill_id':'im-supervised-agent','score':80,'evidence':'test'}]); assert 'gitlab-mr' in [s['source_id'] for s in data['sources']]; print('PASS')"
+Expected: output.py accepts mr_signals kwarg and emits source_id "gitlab-mr"
+Timestamp: 2026-03-23T00:00:00Z
+
+build_output params: ['team_code', 'survey_period', 'artifact_signals', 'ci_signals', 'member_signals', 'review_signals', 'mr_signals']
+source_ids: ['gitlab-mr']
+PASS: gitlab-mr source_id accepted and emitted
+
+Status: PASS

@@ -25,10 +25,13 @@ from ai_fluency_collector.gitlab_scoring import (
     COVERAGE_SKILL_MAPPINGS,
     MEMBER_SKILL_MAPPINGS,
     MR_COAUTHOR_SKILL_MAPPINGS,
+    MR_CODING_TIME_SKILL_MAPPINGS,
+    MR_SIZE_SKILL_MAPPINGS,
     REVIEW_SKILL_MAPPINGS,
     calculate_coverage_scores,
     calculate_member_scores,
     calculate_mr_coauthor_scores,
+    calculate_mr_signals,
     calculate_pipeline_scores,
     calculate_review_scores,
     calculate_scores,
@@ -40,6 +43,7 @@ from ai_fluency_collector.scanners.gitlab_artifact_scanner import (
 )
 from ai_fluency_collector.scanners.gitlab_ci_scanner import CI_PATTERN_IDS, CIScanner
 from ai_fluency_collector.scanners.gitlab_member_scanner import MemberScanner
+from ai_fluency_collector.scanners.gitlab_mr_scanner import MRScanner
 from ai_fluency_collector.scanners.gitlab_review_scanner import ReviewScanner
 
 PERIOD_PATTERN = re.compile(r"^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$")
@@ -403,6 +407,7 @@ def scan(
 
     # 16–18. Per-week: pipeline pass rate + review signals → output file
     review_scanner = ReviewScanner(client)
+    mr_scanner = MRScanner(client)
     output_paths: list[str] = []
     total_signals_all = len(artifact_signals) + len(ci_signals) + len(member_signals)
 
@@ -465,10 +470,22 @@ def scan(
         click.echo(f"  → {len(review_signals)} review signals detected")
         click.echo(f"  → {len(mr_coauthor_signals)} MR co-author signals detected")
 
+        mr_metrics = mr_scanner.scan(effective_members, week)
+        mr_signals = calculate_mr_signals(
+            mr_metrics, MR_SIZE_SKILL_MAPPINGS, MR_CODING_TIME_SKILL_MAPPINGS
+        )
+        click.echo(f"  → {len(mr_signals)} MR signals detected")
+
         week_member_signals = member_signals + mr_coauthor_signals
 
         data = build_output(
-            team.code, week, artifact_signals, week_ci_signals, week_member_signals, review_signals
+            team.code,
+            week,
+            artifact_signals,
+            week_ci_signals,
+            week_member_signals,
+            review_signals,
+            mr_signals,
         )
         output_path = write_output(data, team.code, week)
         output_paths.append(output_path)

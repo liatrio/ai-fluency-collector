@@ -1,0 +1,59 @@
+Type: test
+Command: .venv/bin/pytest tests/test_mr_scanner.py -v
+Expected: 46 passed
+Timestamp: 2026-03-23T00:00:00Z
+
+============================= test session starts ==============================
+platform darwin -- Python 3.14.3, pytest-9.0.2, pluggy-1.6.0
+collected 46 items
+
+tests/test_mr_scanner.py::test_parse_changes_count_int PASSED
+tests/test_mr_scanner.py::test_parse_changes_count_string_number PASSED
+tests/test_mr_scanner.py::test_parse_changes_count_none PASSED
+tests/test_mr_scanner.py::test_parse_changes_count_too_many_changes PASSED
+tests/test_mr_scanner.py::test_parse_changes_count_empty_string PASSED
+tests/test_mr_scanner.py::test_parse_changes_count_float_string PASSED
+tests/test_mr_scanner.py::test_pr_size_score_under_200 PASSED
+tests/test_mr_scanner.py::test_pr_size_score_200_to_399 PASSED
+tests/test_mr_scanner.py::test_pr_size_score_400_to_799 PASSED
+tests/test_mr_scanner.py::test_pr_size_score_800_to_1499 PASSED
+tests/test_mr_scanner.py::test_pr_size_score_1500_and_above PASSED
+tests/test_mr_scanner.py::test_scan_ai_attributed_mr_emits_pr_size PASSED
+tests/test_mr_scanner.py::test_scan_non_ai_mr_excluded PASSED
+tests/test_mr_scanner.py::test_scan_no_mrs_in_period PASSED
+tests/test_mr_scanner.py::test_scan_ignores_mr_with_invalid_changes_count PASSED
+tests/test_mr_scanner.py::test_scan_ignores_mr_with_none_changes_count PASSED
+tests/test_mr_scanner.py::test_scan_median_of_multiple_mrs PASSED
+tests/test_mr_scanner.py::test_scan_mixed_ai_and_non_ai_mrs PASSED
+tests/test_mr_scanner.py::test_scan_evidence_format PASSED
+tests/test_mr_scanner.py::test_coding_time_hours_basic PASSED
+tests/test_mr_scanner.py::test_coding_time_hours_uses_earliest_commit PASSED
+tests/test_mr_scanner.py::test_coding_time_hours_empty_commits PASSED
+tests/test_mr_scanner.py::test_coding_time_hours_no_mr_created_at PASSED
+tests/test_mr_scanner.py::test_coding_time_hours_commits_missing_created_at PASSED
+tests/test_mr_scanner.py::test_coding_time_hours_clock_skew_clamped PASSED
+tests/test_mr_scanner.py::test_coding_time_score_under_2h PASSED
+tests/test_mr_scanner.py::test_coding_time_score_2_to_7h PASSED
+tests/test_mr_scanner.py::test_coding_time_score_8_to_23h PASSED
+tests/test_mr_scanner.py::test_coding_time_score_1_to_3_days PASSED
+tests/test_mr_scanner.py::test_coding_time_score_over_3_days PASSED
+tests/test_mr_scanner.py::test_scan_coding_time_computed_for_ai_mr PASSED
+tests/test_mr_scanner.py::test_scan_coding_time_none_for_zero_commit_mr PASSED
+tests/test_mr_scanner.py::test_scan_coding_time_evidence_format PASSED
+tests/test_mr_scanner.py::test_calculate_scores_emits_im_supervised_agent PASSED
+tests/test_mr_scanner.py::test_calculate_scores_correct_score_for_small_pr PASSED
+tests/test_mr_scanner.py::test_calculate_scores_correct_score_for_large_pr PASSED
+tests/test_mr_scanner.py::test_calculate_scores_none_median_no_signals PASSED
+tests/test_mr_scanner.py::test_calculate_scores_none_metrics_no_signals PASSED
+tests/test_mr_scanner.py::test_calculate_scores_evidence_in_signal PASSED
+tests/test_mr_scanner.py::test_mr_signals_emits_both_coding_time_skills PASSED
+tests/test_mr_scanner.py::test_mr_signals_correct_score_for_fast_coding PASSED
+tests/test_mr_scanner.py::test_mr_signals_correct_score_for_slow_coding PASSED
+tests/test_mr_scanner.py::test_mr_signals_both_present_combines_signals PASSED
+tests/test_mr_scanner.py::test_mr_signals_none_metrics_no_signals PASSED
+tests/test_mr_scanner.py::test_mr_signals_both_none_no_signals PASSED
+tests/test_mr_scanner.py::test_mr_signals_coding_time_evidence_propagated PASSED
+
+============================== 46 passed in 0.16s ==============================
+
+Status: PASS

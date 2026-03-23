@@ -1,0 +1,23 @@
+Type: cli
+Command: .venv/bin/python -c "from ai_fluency_collector.output import build_output; import json; data = build_output('test','2026-W12',[],[],mr_signals=[{'skill_id':'im-supervised-agent','score':80,'evidence':'PR size (AI-attributed): 300 median lines changed (N=3 MRs)'}]); print(json.dumps(data,indent=2))"
+Expected: JSON output contains source_id "gitlab-mr" with im-supervised-agent signal
+Timestamp: 2026-03-23T00:00:00Z
+
+{
+  "team_code": "test",
+  "survey_period": "2026-W12",
+  "sources": [
+    {
+      "source_id": "gitlab-mr",
+      "signals": [
+        {
+          "skill_id": "im-supervised-agent",
+          "score": 80,
+          "evidence": "PR size (AI-attributed): 300 median lines changed (N=3 MRs)"
+        }
+      ]
+    }
+  ]
+}
+
+Status: PASS
