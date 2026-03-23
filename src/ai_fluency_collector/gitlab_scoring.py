@@ -76,6 +76,64 @@ MR_COAUTHOR_SKILL_MAPPINGS: dict[str, list[dict]] = {
     ],
 }
 
+# MR size → skill mappings (source: gitlab-mr).
+# score_fn takes the median lines changed (int) and returns an int score 0–100.
+def _pr_size_score(median_lines: float) -> int:
+    if median_lines < 200:
+        return 100
+    if median_lines < 400:
+        return 80
+    if median_lines < 800:
+        return 60
+    if median_lines < 1500:
+        return 35
+    return 10
+
+
+MR_SIZE_SKILL_MAPPINGS: dict[str, list[dict]] = {
+    "pr_size_median": [
+        {"skill_id": "im-supervised-agent", "score_fn": _pr_size_score},
+    ],
+}
+
+
+def calculate_mr_size_scores(metrics, mappings: dict) -> list[dict]:
+    """Calculate skill scores from MR size metrics.
+
+    Args:
+        metrics: MRMetrics object from MRScanner.scan().
+        mappings: MR_SIZE_SKILL_MAPPINGS dict.
+
+    Returns:
+        List of {skill_id, score, evidence} dicts. Empty if no AI-attributed MRs found.
+    """
+    if metrics is None or metrics.pr_size_median is None:
+        return []
+
+    metric_values = {
+        "pr_size_median": metrics.pr_size_median,
+    }
+
+    signals: list[dict] = []
+    for metric_key, skill_maps in mappings.items():
+        value = metric_values.get(metric_key)
+        if value is None:
+            continue
+        for m in skill_maps:
+            score = m["score_fn"](value)
+            if score <= 0:
+                continue
+            evidence = metrics.evidence.get(metric_key, "detected")
+            signals.append({
+                "skill_id": m["skill_id"],
+                "score": score,
+                "evidence": evidence,
+                "scoring_context": _rate_context(evidence),
+            })
+
+    return signals
+
+
 # Member activity → skill mappings
 # Score based on percentage of members showing AI co-author activity
 MEMBER_SKILL_MAPPINGS: list[dict] = [
