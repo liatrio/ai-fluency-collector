@@ -12,10 +12,12 @@ Fill in the four placeholders marked with [BRACKETS] before running.
 
 SKILLS TARGETED
   sdlc-deployment    L4 — deployment frequency
-  pm-measurement     L4 — lead time for changes
-  tg-security-gates  L3 — change failure rate (N>=5 only)
-  tg-code-review     L2 — change failure rate (N>=5 only)
-  sdlc-monitoring    L4 — MTTR (skipped if no incidents)
+  pm-measurement     L4 — lead time / issue cycle time / sprint completion
+  tg-security-gates  L3 — change failure rate (N>=5 only) / defect rate
+  tg-code-review     L2 — change failure rate (N>=5 only) / review pass rate
+  sdlc-monitoring    L4 — incident MTTR / defect MTTR (skipped if no data)
+  cq-evaluation      L3 — PRs without comments / comments per PR (Critical Evaluation)
+  cq-context         L2 — unlinked PR percentage
 
 SOURCE ID: jellyfish-dora
 
@@ -41,12 +43,36 @@ Date range: [START DATE e.g. 2026-03-01] to [END DATE e.g. 2026-03-31]
 Use the current calendar month as the date range. Jellyfish aggregates most
 DORA metrics at the monthly level so a monthly window gives the cleanest data.
 
-Fetch the following metrics for this team over this date range:
-1. Deployment frequency (total deployments in the period)
-2. Lead time for changes (median, in hours)
-3. Change failure rate (% of deployments that caused an incident or rollback)
-4. MTTR — mean time to recover (median, in hours or minutes)
-5. PR throughput (PRs merged per engineer per week, if available)
+Fetch the following metrics for this team over this date range using these exact slugs:
+
+DORA Metrics:
+1. Deployment frequency — slug: teamDeployments (total deployments in the period)
+2. Lead time for changes — slug: teamCommitLeadTime (median, in hours)
+3. Deployment failure rate — slug: teamDeploymentFailureRate (% of deployments that caused an incident or rollback)
+4. Incident MTTR — slug: teamIncidentMeanTimeToResolve (median, in hours)
+
+Code Review Quality:
+5. Comments per PR (median) — slug: commentsPerPrMdn
+6. PRs without any comments — slug: prNoComments (count)
+7. PRs merged (total) — slug: mergedPrs (needed as denominator for #6)
+8. PR review pass rate — slug: prReviewsPassrate (percent)
+9. Unlinked PRs percentage — slug: unlinkedPrPercentage (percent)
+
+Defect Quality:
+10. Defects opened — slug: openedDefects (count)
+11. Defects resolved — slug: resolvedDefects (count)
+12. Defect MTTR — slug: defectMTTR (hours)
+
+Delivery:
+13. Issue cycle time (median) — slug: resolvedIssueCycleTimeMdn (hours)
+
+Sprint Health:
+14. Sprint completion rate — slug: teamSprintCompletionRate (percent)
+15. Sprint addition rate — slug: teamSprintAdditionRate (percent)
+
+Normalization:
+16. Contributor count — slug: contributor_count
+17. Person-weeks — slug: personWeeks
 
 If a metric is unavailable or returns no data, skip it — do not fabricate a score.
 
@@ -107,6 +133,100 @@ Evidence format: "PR throughput: X PRs/engineer/week"
 Note: Only include this if lead time data is unavailable, to avoid
 double-counting pm-measurement.
 
+### Comments per PR (median) and PRs Without Comments -> skills: cq-evaluation AND cq-critical
+These two signals combine into one score for both skills:
+  rubber_stamp_rate = prNoComments / mergedPrs * 100  (skip if mergedPrs = 0)
+
+rubber_stamp_rate | Score
+------------------|------
+0–5%              | 100
+5–15%             | 80
+15–30%            | 60
+30–50%            | 40
+> 50%             | 20
+
+If commentsPerPrMdn >= 3: add 10 points to score (capped at 100).
+If commentsPerPrMdn < 1: subtract 10 points from score (floored at 0).
+
+Evidence format: "Review depth: X comments/PR (median), Y PRs had zero comments (Z% of merged)"
+Apply this score to cq-evaluation only.
+Skip if mergedPrs = 0.
+
+### PR Review Pass Rate -> skill: tg-code-review (supplement to change failure rate)
+Note: Only include as a SEPARATE signal entry if change failure rate was skipped (N < 5 deployments).
+Otherwise the change failure rate signal already covers tg-code-review.
+
+Pass rate | Score
+----------|------
+90–100%   | 100
+75–90%    | 80
+50–75%    | 60
+25–50%    | 40
+< 25%     | 20
+
+Evidence format: "PR review pass rate: X%"
+
+### Unlinked PRs Percentage -> skill: cq-context
+Score = max(0, round(100 - (unlinked_pct * 2)))
+Examples: 0% unlinked -> 100, 25% -> 50, 50%+ -> 0
+
+Evidence format: "Unlinked PRs: X% (Y of Z merged PRs have no linked issue)"
+
+### Issue Cycle Time -> skill: pm-measurement (supplement; only if lead time available; use separate evidence)
+Note: Do not replace lead time signal. Add as additional evidence on the same pm-measurement entry
+or as a second pm-measurement entry only if you have both — prefer a single entry with combined evidence.
+
+Issue cycle time | Score
+-----------------|------
+< 2 days         | 100
+2–7 days         | 85
+1–2 weeks        | 65
+2–4 weeks        | 40
+> 1 month        | 10
+
+Evidence format: "Issue cycle time: Xh median (Xd)"
+
+### Defect Rate -> skill: tg-security-gates (supplement to change failure rate)
+Only include if openedDefects > 0 and change failure rate was not already computed.
+Compute: defect_ratio = resolvedDefects / openedDefects
+
+defect_ratio | Score
+-------------|------
+>= 1.5       | 100
+1.0–1.5      | 80
+0.75–1.0     | 60
+0.5–0.75     | 40
+< 0.5        | 20
+
+Evidence format: "Defect rate: X opened, Y resolved this period (ratio: Z)"
+
+### Defect MTTR -> skill: sdlc-monitoring (supplement to incident MTTR)
+Only include if defectMTTR is available and teamIncidentMeanTimeToResolve was skipped.
+
+MTTR        | Score
+------------|------
+< 1 hour    | 100
+1–4 hours   | 80
+4–24 hours  | 60
+1–7 days    | 35
+> 1 week    | 10
+
+Evidence format: "Defect MTTR: Xh median"
+
+### Sprint Completion Rate -> skill: pm-measurement (supplement; combine evidence with lead time entry)
+Note: Only add sprint signals if sprint data is available (teamSprintsCompleted > 0).
+
+Completion rate | Score adjustment
+----------------|----------------
+>= 90%          | +10 (bonus signal — mention in evidence)
+75–90%          | no adjustment
+60–75%          | -10
+< 60%           | -20
+
+Do not emit a separate signal for sprint completion. Instead, adjust the pm-measurement score
+up or down and append to the evidence string:
+Evidence appendage: ", sprint completion: X% (sprint addition rate: Y%)"
+
 ## Step 4 — Write the output file
 
 Write the result to: ~/Downloads/jellyfish-[TEAM_CODE]-[SURVEY_PERIOD].json
@@ -136,9 +256,12 @@ Evidence strings must be plain text with no markdown.
 Valid skill IDs for this collector:
 - sdlc-deployment
 - sdlc-monitoring
+- sdlc-planning
 - pm-measurement
 - tg-security-gates
 - tg-code-review
+- cq-evaluation
+- cq-context
 
 ## Step 5 — Confirm
 Print the full JSON to the console and confirm the file path it was written to.
