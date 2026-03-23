@@ -93,6 +93,7 @@ class ReviewScanner:
         self_reviewed_count = 0
         mrs_with_any_ai_tag = 0
         mrs_with_agentic_tag = 0
+        # Counts MRs (not commits) that had at least one commit with each tool's tag
         tool_mr_counts: dict[str, int] = {p["id"]: 0 for p in MR_AI_COAUTHOR_PATTERNS}
 
         # Reviewer aggregates (comment depth)
@@ -117,14 +118,17 @@ class ReviewScanner:
                 commits = self.client.get_mr_commits(project_id, mr_iid)
                 mr_has_any_ai = False
                 mr_has_agentic = False
+                mr_tools_seen: set[str] = set()
                 for commit in commits:
                     message = commit.get("message", "") or commit.get("title", "")
                     for pat in MR_AI_COAUTHOR_PATTERNS:
                         if pat["pattern"].search(message):
-                            tool_mr_counts[pat["id"]] += 1
+                            mr_tools_seen.add(pat["id"])
                             mr_has_any_ai = True
                             if pat["agentic"]:
                                 mr_has_agentic = True
+                for tool_id in mr_tools_seen:
+                    tool_mr_counts[tool_id] += 1
                 if mr_has_any_ai:
                     mrs_with_any_ai_tag += 1
                 if mr_has_agentic:
