@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ai_fluency_collector.gitlab_scoring import _rate_context
+
 # Review behavioral metrics → skill mappings.
 # score_fn takes the computed metric rate (float 0.0–1.0) and returns int 0–100.
 GITHUB_REVIEW_SKILL_MAPPINGS: dict[str, list[dict]] = {
@@ -56,7 +58,7 @@ def calculate_github_review_scores(metrics, mappings: dict) -> list[dict]:
                 "skill_id": m["skill_id"],
                 "score": score,
                 "evidence": evidence,
-                "scoring_context": {"breakdown": evidence, "max_from_this_signal": 100},
+                "scoring_context": _rate_context(evidence),
             })
 
     return signals

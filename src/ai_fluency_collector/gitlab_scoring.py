@@ -477,9 +477,15 @@ def calculate_scores(
             name = artifact_names.get(aid, aid) if artifact_names else _get_artifact_name(aid)
             loc_parts = []
             if feat > 0:
-                loc_parts.append(f"{feat}/{num_projects} on feature branches (weight: 0.8)")
+                loc_parts.append(
+                    f"{feat}/{num_projects} on feature branches "
+                    f"(weight: {FEATURE_BRANCH_WEIGHT:.1f})"
+                )
             if dflt > 0:
-                loc_parts.append(f"{dflt}/{num_projects} on default branch (weight: 0.5)")
+                loc_parts.append(
+                    f"{dflt}/{num_projects} on default branch "
+                    f"(weight: {DEFAULT_BRANCH_WEIGHT:.1f})"
+                )
             breakdown_parts.append(f"{name}: {', '.join(loc_parts)}")
         breakdown = "; ".join(breakdown_parts) if breakdown_parts else evidence
 
