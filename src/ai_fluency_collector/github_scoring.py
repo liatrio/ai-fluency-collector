@@ -52,6 +52,11 @@ def calculate_github_review_scores(metrics, mappings: dict) -> list[dict]:
             if score <= 0:
                 continue
             evidence = metrics.evidence.get(metric_key, "detected")
-            signals.append({"skill_id": m["skill_id"], "score": score, "evidence": evidence})
+            signals.append({
+                "skill_id": m["skill_id"],
+                "score": score,
+                "evidence": evidence,
+                "scoring_context": {"breakdown": evidence, "max_from_this_signal": 100},
+            })
 
     return signals

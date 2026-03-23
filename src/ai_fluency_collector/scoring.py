@@ -87,6 +87,11 @@ MEMBER_SKILL_MAPPINGS: list[dict] = [
 ]
 
 
+def _rate_context(breakdown: str) -> dict:
+    """Build a scoring_context for rate-based signals (no weight cap, max=100)."""
+    return {"breakdown": breakdown, "max_from_this_signal": 100}
+
+
 def calculate_coverage_scores(
     current_results: list,
     prior_results: list | None,
@@ -142,7 +147,12 @@ def calculate_coverage_scores(
         return []
 
     return [
-        {"skill_id": m["skill_id"], "score": score, "evidence": evidence}
+        {
+            "skill_id": m["skill_id"],
+            "score": score,
+            "evidence": evidence,
+            "scoring_context": _rate_context(evidence),
+        }
         for m in mappings
     ]
 
@@ -180,7 +190,12 @@ def calculate_pipeline_scores(
             score = m["score_fn"](mean_rate)
             if score <= 0:
                 continue
-            signals.append({"skill_id": m["skill_id"], "score": score, "evidence": evidence})
+            signals.append({
+                "skill_id": m["skill_id"],
+                "score": score,
+                "evidence": evidence,
+                "scoring_context": _rate_context(evidence),
+            })
 
     return signals
 
@@ -213,7 +228,12 @@ def calculate_mr_coauthor_scores(metrics, mappings: dict) -> list[dict]:
             if score <= 0:
                 continue
             evidence = metrics.evidence.get(metric_key, "detected")
-            signals.append({"skill_id": m["skill_id"], "score": score, "evidence": evidence})
+            signals.append({
+                "skill_id": m["skill_id"],
+                "score": score,
+                "evidence": evidence,
+                "scoring_context": _rate_context(evidence),
+            })
 
     return signals
 
@@ -247,7 +267,12 @@ def calculate_review_scores(metrics, mappings: dict) -> list[dict]:
             if score <= 0:
                 continue
             evidence = metrics.evidence.get(metric_key, "detected")
-            signals.append({"skill_id": m["skill_id"], "score": score, "evidence": evidence})
+            signals.append({
+                "skill_id": m["skill_id"],
+                "score": score,
+                "evidence": evidence,
+                "scoring_context": _rate_context(evidence),
+            })
 
     return signals
 
@@ -328,7 +353,25 @@ def calculate_member_scores(
             continue
 
         evidence = "; ".join(evidence_parts) if evidence_parts else "detected"
-        signals.append({"skill_id": skill_id, "score": score, "evidence": evidence})
+
+        # scoring_context: what score if all members had each found pattern?
+        max_found_weight = sum(
+            m["weight"]
+            for m in skill_maps
+            if pattern_member_counts.get(m["artifact_id"], 0) > 0
+        )
+        max_signal = (
+            round(min(100.0, (max_found_weight / total_weight) * 100.0))
+            if total_weight > 0
+            else 0
+        )
+        breakdown = evidence  # member fraction already described in evidence
+        signals.append({
+            "skill_id": skill_id,
+            "score": score,
+            "evidence": evidence,
+            "scoring_context": {"breakdown": breakdown, "max_from_this_signal": max_signal},
+        })
 
     return signals
 
@@ -371,54 +414,90 @@ def calculate_scores(
     for m in mappings:
         skill_mappings[m["skill_id"]].append(m)
 
+    from ai_fluency_collector.scanners.artifact_scanner import (
+        DEFAULT_BRANCH_WEIGHT,
+        FEATURE_BRANCH_WEIGHT,
+    )
+
     signals: list[dict] = []
 
     for skill_id, skill_maps in skill_mappings.items():
-        # For each project, compute the score contribution
+        total_weight = sum(m["weight"] for m in skill_maps)
+
+        # Per-project scores and artifact tracking
         project_scores: list[float] = []
-        # Track artifact presence across projects for evidence
         artifact_counts: dict[str, int] = defaultdict(int)
+        feature_counts: dict[str, int] = defaultdict(int)
+        default_counts: dict[str, int] = defaultdict(int)
 
         for project_result in scan_results:
             found_weight = 0.0
-            total_weight = 0.0
             for m in skill_maps:
-                total_weight += m["weight"]
                 value = project_result.get(m["artifact_id"], False)
                 if isinstance(value, (int, float)) and value > 0:
-                    # Float: scale mapping weight by branch weight
                     found_weight += m["weight"] * value
                     artifact_counts[m["artifact_id"]] += 1
+                    if value >= FEATURE_BRANCH_WEIGHT:
+                        feature_counts[m["artifact_id"]] += 1
+                    elif value >= DEFAULT_BRANCH_WEIGHT:
+                        default_counts[m["artifact_id"]] += 1
                 elif value is True:
-                    # Bool True: full mapping weight (backwards compat)
                     found_weight += m["weight"]
                     artifact_counts[m["artifact_id"]] += 1
+                    feature_counts[m["artifact_id"]] += 1  # bool True = best branch
             if total_weight > 0:
                 project_scores.append(min(100.0, (found_weight / total_weight) * 100.0))
             else:
                 project_scores.append(0.0)
 
-        # Average across projects
         avg_score = sum(project_scores) / num_projects if project_scores else 0.0
         score = round(avg_score)
 
         if score <= 0:
             continue
 
-        # Build evidence string
+        # Evidence: artifact presence counts
         evidence_parts = []
         for m in skill_maps:
             aid = m["artifact_id"]
             if artifact_counts[aid] > 0:
-                if artifact_names:
-                    name = artifact_names.get(aid, aid)
-                else:
-                    name = _get_artifact_name(aid)
+                name = artifact_names.get(aid, aid) if artifact_names else _get_artifact_name(aid)
                 count = artifact_counts[aid]
                 evidence_parts.append(f"{name} found in {count}/{num_projects} projects")
-
         evidence = "; ".join(evidence_parts) if evidence_parts else "detected"
 
-        signals.append({"skill_id": skill_id, "score": score, "evidence": evidence})
+        # scoring_context: branch-type breakdown and score cap
+        breakdown_parts = []
+        for m in skill_maps:
+            aid = m["artifact_id"]
+            feat = feature_counts[aid]
+            dflt = default_counts[aid]
+            if feat + dflt == 0:
+                continue
+            name = artifact_names.get(aid, aid) if artifact_names else _get_artifact_name(aid)
+            loc_parts = []
+            if feat > 0:
+                loc_parts.append(f"{feat}/{num_projects} on feature branches (weight: 0.8)")
+            if dflt > 0:
+                loc_parts.append(f"{dflt}/{num_projects} on default branch (weight: 0.5)")
+            breakdown_parts.append(f"{name}: {', '.join(loc_parts)}")
+        breakdown = "; ".join(breakdown_parts) if breakdown_parts else evidence
+
+        max_found_weight = 0.0
+        for m in skill_maps:
+            aid = m["artifact_id"]
+            best = max((float(r.get(aid, 0)) for r in scan_results), default=0.0)
+            if best > 0:
+                max_found_weight += m["weight"] * best
+        max_signal = (
+            round(min(100.0, max_found_weight / total_weight * 100.0)) if total_weight > 0 else 0
+        )
+
+        signals.append({
+            "skill_id": skill_id,
+            "score": score,
+            "evidence": evidence,
+            "scoring_context": {"breakdown": breakdown, "max_from_this_signal": max_signal},
+        })
 
     return signals

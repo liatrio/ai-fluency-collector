@@ -114,7 +114,16 @@ class GitHubArtifactScanner:
                 continue
             found_in = skill_repos.get(skill_id, [])
             evidence = f"Found in {len(found_in)}/{num_repos} repos: {', '.join(found_in)}"
-            signals.append({"skill_id": skill_id, "score": score, "evidence": evidence})
+            breakdown = (
+                f"{evidence}; tiered score {score} "
+                f"(depth-based: higher scores reflect richer content or more files)"
+            )
+            signals.append({
+                "skill_id": skill_id,
+                "score": score,
+                "evidence": evidence,
+                "scoring_context": {"breakdown": breakdown, "max_from_this_signal": 100},
+            })
 
         return signals
 
