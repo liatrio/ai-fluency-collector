@@ -135,6 +135,36 @@ def test_ci_missing_signals():
 # ── calculate_member_scores ───────────────────────────────────────────────────
 
 
+def test_member_missing_signals_partial():
+    """missing_signals lists co-author pattern IDs with zero members when some are absent."""
+    from ai_fluency_collector.scanners.gitlab_member_scanner import MemberResult
+
+    # im-autocomplete maps to coauthor-copilot (0.5) and coauthor-cursor (0.3)
+    # Only coauthor-copilot triggered → coauthor-cursor should appear in missing_signals
+    results = [
+        MemberResult("alice", repos_discovered=1, ai_coauthor_counts={"coauthor-copilot": 3}),
+    ]
+    signals = calculate_member_scores(results, MEMBER_SKILL_MAPPINGS)
+    autocomplete = next(s for s in signals if s["skill_id"] == "im-autocomplete")
+    ctx = autocomplete["scoring_context"]
+    assert "missing_signals" in ctx
+    assert "coauthor-cursor" in ctx["missing_signals"]
+    assert "coauthor-copilot" not in ctx["missing_signals"]
+
+
+def test_member_missing_signals_omitted_when_all_found():
+    """missing_signals is absent when all contributing co-author patterns are found."""
+    from ai_fluency_collector.scanners.gitlab_member_scanner import MemberResult
+
+    # im-cli-agent maps only to coauthor-claude; if found, no missing signals
+    results = [
+        MemberResult("alice", repos_discovered=1, ai_coauthor_counts={"coauthor-claude": 5}),
+    ]
+    signals = calculate_member_scores(results, MEMBER_SKILL_MAPPINGS)
+    cli = next(s for s in signals if s["skill_id"] == "im-cli-agent")
+    assert "missing_signals" not in cli["scoring_context"]
+
+
 def test_member_scoring_context_present():
     """Member activity signals include scoring_context."""
     from ai_fluency_collector.scanners.gitlab_member_scanner import MemberResult
