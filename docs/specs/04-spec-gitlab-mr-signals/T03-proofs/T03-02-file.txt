@@ -1,0 +1,13 @@
+Type: file
+Command: grep -c "gitlab-mr\|PR Size\|Coding Time\|MR_SIZE_SKILL_MAPPINGS\|MR_CODING_TIME_SKILL_MAPPINGS" docs/scoring.md
+Expected: docs/scoring.md contains gitlab-mr section with both rubric tables
+Timestamp: 2026-03-23T00:00:00Z
+
+Verified contents:
+- "gitlab-mr" appears in scoring.md GitLab MR Signals section header
+- PR Size rubric table (5 score bands) documented
+- Coding Time rubric table (5 score bands) documented
+- MR_SIZE_SKILL_MAPPINGS reference documented
+- MR_CODING_TIME_SKILL_MAPPINGS reference documented
+
+Status: PASS

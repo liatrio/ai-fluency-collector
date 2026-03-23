@@ -117,6 +117,60 @@ Computed from aggregated merge request data for the survey period. Scores are de
 
 System notes (bot comments, status changes, label additions) are excluded from all analysis. Only `system: false` notes count as review activity. For example, if 3 out of 5 members have Claude co-authored commits, the weight contribution is scaled by 3/5 = 60%.
 
+## GitLab MR Signals
+
+Computed from merged MRs authored by team members during the survey period. Only **AI-attributed MRs** (those containing at least one commit with an AI `Co-Authored-By` tag) are included. If no AI-attributed MRs exist in the period, no signals are emitted. Scores are team-level aggregates with no individual attribution. Signals are emitted under `gitlab-mr`.
+
+### PR Size
+
+Measures the median `changes_count` (total lines changed) across AI-attributed merged MRs. Low scores indicate large, poorly-decomposed AI-assisted PRs.
+
+| Metric Key | What It Measures | Skill ID |
+|---|---|---|
+| `pr_size_median` | Median lines changed per AI-attributed merged MR | `im-supervised-agent` |
+
+**Score rubric:**
+
+| Median lines changed | Score |
+|---|---|
+| < 200 | 100 |
+| 200 – 399 | 80 |
+| 400 – 799 | 60 |
+| 800 – 1499 | 35 |
+| ≥ 1500 | 10 |
+
+**Edge cases:** `changes_count` values of `None` or `"too many changes"` are excluded from the median. If all AI-attributed MRs have invalid counts, no signal is emitted.
+
+**Evidence format:** `"PR size (AI-attributed): 287 median lines changed (N=5 MRs)"`
+
+Mappings live in `src/ai_fluency_collector/gitlab_scoring.py` as `MR_SIZE_SKILL_MAPPINGS`.
+
+### Coding Time
+
+Measures the median elapsed time from the **earliest commit on the MR branch** to **MR open** (`created_at`), in hours, across AI-attributed merged MRs. Low values indicate AI is accelerating the implementation cycle.
+
+Commits are reused from the co-author attribution check — no extra API calls are made.
+
+| Metric Key | What It Measures | Skill IDs |
+|---|---|---|
+| `coding_time_median` | Median hours from first commit to MR open for AI-attributed MRs | `im-inline-editing`, `im-supervised-agent` |
+
+**Score rubric:**
+
+| Median coding time | Score |
+|---|---|
+| < 2 hours | 100 |
+| 2 – 7 hours | 85 |
+| 8 – 23 hours | 65 |
+| 24 – 71 hours (1 – 3 days) | 40 |
+| ≥ 72 hours (> 3 days) | 15 |
+
+**Edge cases:** MRs with no commits are excluded. Clock skew (commit timestamp after MR open) is clamped to 0.0 hours.
+
+**Evidence format:** `"Coding time (AI-attributed): 5.2h median first commit to MR open (N=5 MRs)"`
+
+Mappings live in `src/ai_fluency_collector/gitlab_scoring.py` as `MR_CODING_TIME_SKILL_MAPPINGS`.
+
 ## Branch Scanning
 
 The collector scans all **active branches** (branches with a commit within the last 90 days). Stale branches are excluded to avoid false signals from abandoned work.
