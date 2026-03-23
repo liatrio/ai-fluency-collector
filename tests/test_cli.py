@@ -6,7 +6,7 @@ import yaml
 from click.testing import CliRunner
 
 from ai_fluency_collector.cli import main
-from ai_fluency_collector.scanners.member_scanner import MemberResult
+from ai_fluency_collector.scanners.gitlab_member_scanner import MemberResult
 
 
 def _write_valid_config(tmp_path):

@@ -1,12 +1,7 @@
 """Tests that scoring_context is present and correct on all signal types."""
 from __future__ import annotations
 
-from ai_fluency_collector.scanners.artifact_scanner import (
-    DEFAULT_BRANCH_WEIGHT,
-    FEATURE_BRANCH_WEIGHT,
-)
-from ai_fluency_collector.scanners.ci_scanner import CoverageResult, PipelinePassResult
-from ai_fluency_collector.scoring import (
+from ai_fluency_collector.gitlab_scoring import (
     ARTIFACT_SKILL_MAPPINGS,
     CI_PIPELINE_SKILL_MAPPINGS,
     CI_SKILL_MAPPINGS,
@@ -21,6 +16,11 @@ from ai_fluency_collector.scoring import (
     calculate_review_scores,
     calculate_scores,
 )
+from ai_fluency_collector.scanners.gitlab_artifact_scanner import (
+    DEFAULT_BRANCH_WEIGHT,
+    FEATURE_BRANCH_WEIGHT,
+)
+from ai_fluency_collector.scanners.gitlab_ci_scanner import CoverageResult, PipelinePassResult
 
 # ── calculate_scores (artifact / CI patterns) ─────────────────────────────────
 
@@ -98,7 +98,7 @@ def test_mixed_branches_breakdown():
 
 def test_member_scoring_context_present():
     """Member activity signals include scoring_context."""
-    from ai_fluency_collector.scanners.member_scanner import MemberResult
+    from ai_fluency_collector.scanners.gitlab_member_scanner import MemberResult
 
     results = [
         MemberResult("alice", repos_discovered=1, ai_coauthor_counts={"coauthor-claude": 5}),
@@ -113,7 +113,7 @@ def test_member_scoring_context_present():
 
 def test_member_scoring_context_max_all_members():
     """max_from_this_signal = 100 when a single artifact maps to the skill with full weight."""
-    from ai_fluency_collector.scanners.member_scanner import MemberResult
+    from ai_fluency_collector.scanners.gitlab_member_scanner import MemberResult
 
     # im-cli-agent: only coauthor-claude → weight 0.5, total_weight = 0.5 → max = 100
     results = [MemberResult("alice", repos_discovered=1, ai_coauthor_counts={"coauthor-claude": 3})]
@@ -127,7 +127,7 @@ def test_member_scoring_context_max_all_members():
 
 def test_review_scoring_context_present():
     """Review signals include scoring_context with max=100."""
-    from ai_fluency_collector.scanners.review_scanner import ReviewMetrics
+    from ai_fluency_collector.scanners.gitlab_review_scanner import ReviewMetrics
 
     metrics = ReviewMetrics(
         lgtm_rate=0.2,
@@ -173,7 +173,7 @@ def test_coverage_scoring_context_present():
 
 def test_mr_coauthor_scoring_context_present():
     """MR co-author signals include scoring_context."""
-    from ai_fluency_collector.scanners.review_scanner import ReviewMetrics
+    from ai_fluency_collector.scanners.gitlab_review_scanner import ReviewMetrics
 
     metrics = ReviewMetrics(
         lgtm_rate=None,

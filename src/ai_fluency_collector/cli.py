@@ -17,12 +17,7 @@ from ai_fluency_collector.gitlab_client import (
     GitLabTimeoutError,
     GitLabUserNotFoundError,
 )
-from ai_fluency_collector.output import build_output, write_output
-from ai_fluency_collector.scanners.artifact_scanner import ARTIFACT_DEFINITIONS, ArtifactScanner
-from ai_fluency_collector.scanners.ci_scanner import CI_PATTERN_IDS, CIScanner
-from ai_fluency_collector.scanners.member_scanner import MemberScanner
-from ai_fluency_collector.scanners.review_scanner import ReviewScanner
-from ai_fluency_collector.scoring import (
+from ai_fluency_collector.gitlab_scoring import (
     ARTIFACT_SKILL_MAPPINGS,
     CI_PIPELINE_SKILL_MAPPINGS,
     CI_SKILL_MAPPINGS,
@@ -37,6 +32,14 @@ from ai_fluency_collector.scoring import (
     calculate_review_scores,
     calculate_scores,
 )
+from ai_fluency_collector.output import build_output, write_output
+from ai_fluency_collector.scanners.gitlab_artifact_scanner import (
+    ARTIFACT_DEFINITIONS,
+    ArtifactScanner,
+)
+from ai_fluency_collector.scanners.gitlab_ci_scanner import CI_PATTERN_IDS, CIScanner
+from ai_fluency_collector.scanners.gitlab_member_scanner import MemberScanner
+from ai_fluency_collector.scanners.gitlab_review_scanner import ReviewScanner
 
 PERIOD_PATTERN = re.compile(r"^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$")
 
@@ -300,7 +303,7 @@ def scan(
 
     for project in team.projects:
         if verbose:
-            from ai_fluency_collector.scanners.artifact_scanner import (
+            from ai_fluency_collector.scanners.gitlab_artifact_scanner import (
                 _get_active_branches,
             )
 

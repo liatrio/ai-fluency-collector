@@ -6,7 +6,7 @@ import pytest
 import responses
 
 from ai_fluency_collector.gitlab_client import GitLabAccessError, GitLabClient
-from ai_fluency_collector.scanners.artifact_scanner import (
+from ai_fluency_collector.scanners.gitlab_artifact_scanner import (
     ARTIFACT_DEFINITIONS,
     DEFAULT_BRANCH_WEIGHT,
     FEATURE_BRANCH_WEIGHT,

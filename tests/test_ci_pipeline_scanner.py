@@ -5,8 +5,11 @@ from urllib.parse import quote
 import responses
 
 from ai_fluency_collector.gitlab_client import GitLabClient
-from ai_fluency_collector.scanners.ci_scanner import CIScanner, PipelinePassResult
-from ai_fluency_collector.scoring import CI_PIPELINE_SKILL_MAPPINGS, calculate_pipeline_scores
+from ai_fluency_collector.gitlab_scoring import (
+    CI_PIPELINE_SKILL_MAPPINGS,
+    calculate_pipeline_scores,
+)
+from ai_fluency_collector.scanners.gitlab_ci_scanner import CIScanner, PipelinePassResult
 
 BASE = "https://gitlab.com/api/v4"
 PROJECT = "my-group/my-project"

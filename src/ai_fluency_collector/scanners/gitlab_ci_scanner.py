@@ -359,7 +359,7 @@ class CIScanner:
         branch weight where the pattern was found (0.0 if not found).
         Default branch = 0.5, active feature branch = 0.8.
         """
-        from ai_fluency_collector.scanners.artifact_scanner import (
+        from ai_fluency_collector.scanners.gitlab_artifact_scanner import (
             DEFAULT_BRANCH_WEIGHT,
             FEATURE_BRANCH_WEIGHT,
             _get_active_branches,

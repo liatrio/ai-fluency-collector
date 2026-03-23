@@ -9,8 +9,8 @@ import yaml
 
 from ai_fluency_collector.config import TeamConfig, load_config
 from ai_fluency_collector.gitlab_client import GitLabClient
-from ai_fluency_collector.scanners.artifact_scanner import DEFAULT_BRANCH_WEIGHT
-from ai_fluency_collector.scanners.ci_scanner import CIScanner
+from ai_fluency_collector.scanners.gitlab_artifact_scanner import DEFAULT_BRANCH_WEIGHT
+from ai_fluency_collector.scanners.gitlab_ci_scanner import CIScanner
 
 BASE = "https://gitlab.com/api/v4"
 PROJECT = "my-group/my-project"

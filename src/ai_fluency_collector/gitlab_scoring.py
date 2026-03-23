@@ -329,7 +329,7 @@ def calculate_member_scores(
                 found_weight += m["weight"] * (member_count / num_members)
                 commits = pattern_total_commits.get(aid, 0)
                 # Get pattern display name
-                from ai_fluency_collector.scanners.member_scanner import (
+                from ai_fluency_collector.scanners.gitlab_member_scanner import (
                     AI_COAUTHOR_PATTERNS,
                 )
 
@@ -378,7 +378,7 @@ def calculate_member_scores(
 
 def _get_artifact_name(artifact_id: str) -> str:
     """Look up the human-readable artifact name."""
-    from ai_fluency_collector.scanners.artifact_scanner import ARTIFACT_DEFINITIONS
+    from ai_fluency_collector.scanners.gitlab_artifact_scanner import ARTIFACT_DEFINITIONS
 
     for defn in ARTIFACT_DEFINITIONS:
         if defn["id"] == artifact_id:
@@ -414,7 +414,7 @@ def calculate_scores(
     for m in mappings:
         skill_mappings[m["skill_id"]].append(m)
 
-    from ai_fluency_collector.scanners.artifact_scanner import (
+    from ai_fluency_collector.scanners.gitlab_artifact_scanner import (
         DEFAULT_BRANCH_WEIGHT,
         FEATURE_BRANCH_WEIGHT,
     )
