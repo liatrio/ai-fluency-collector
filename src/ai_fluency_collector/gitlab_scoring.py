@@ -87,6 +87,56 @@ MEMBER_SKILL_MAPPINGS: list[dict] = [
 ]
 
 
+def _artifact_breakdown(
+    name: str, feat: int, dflt: int, missing: int, num_projects: int
+) -> str:
+    """Build a human-readable breakdown sentence for an artifact signal.
+
+    Args:
+        name: Display name of the artifact (e.g. "CLAUDE.md").
+        feat: Number of projects where it was found on a feature branch only.
+        dflt: Number of projects where it was found on the default branch.
+        missing: Number of projects where it was not found at all.
+        num_projects: Total number of team projects.
+    """
+    total_found = feat + dflt
+
+    if total_found == num_projects:
+        # Found everywhere
+        if dflt == num_projects:
+            return f"{name} found in all {num_projects} projects on the default branch."
+        if feat == num_projects:
+            return (
+                f"{name} found in all {num_projects} projects, but only on feature branches. "
+                f"Move to the default branch for a higher score."
+            )
+        # Mixed: some default, some feature-only
+        return (
+            f"{name} found in all {num_projects} projects — "
+            f"{dflt} on the default branch, {feat} on feature branches only. "
+            f"Move the remaining {feat} to the default branch for a higher score."
+        )
+    else:
+        # Not found in all projects
+        hint_parts = []
+        if missing > 0:
+            hint_parts.append(f"add to the remaining {missing} project{'s' if missing > 1 else ''}")
+        if feat > 0:
+            hint_parts.append("move to the default branch")
+        hint = " and ".join(hint_parts)
+
+        location = ""
+        if feat > 0 and dflt > 0:
+            location = f" ({dflt} on default branch, {feat} on feature branches only)"
+        elif feat > 0:
+            location = " (feature branch only)"
+
+        return (
+            f"{name} found in {total_found} of {num_projects} projects{location}. "
+            f"{'To improve: ' + hint + '.' if hint else ''}"
+        ).strip()
+
+
 def _rate_context(breakdown: str) -> dict:
     """Build a scoring_context for rate-based signals (no weight cap, max=100)."""
     return {"breakdown": breakdown, "max_from_this_signal": 100}
@@ -466,28 +516,19 @@ def calculate_scores(
                 evidence_parts.append(f"{name} found in {count}/{num_projects} projects")
         evidence = "; ".join(evidence_parts) if evidence_parts else "detected"
 
-        # scoring_context: branch-type breakdown and score cap
+        # scoring_context: human-readable explanation of current state and how to improve
         breakdown_parts = []
         for m in skill_maps:
             aid = m["artifact_id"]
             feat = feature_counts[aid]
             dflt = default_counts[aid]
-            if feat + dflt == 0:
+            total_found = feat + dflt
+            if total_found == 0:
                 continue
             name = artifact_names.get(aid, aid) if artifact_names else _get_artifact_name(aid)
-            loc_parts = []
-            if feat > 0:
-                loc_parts.append(
-                    f"{feat}/{num_projects} on feature branches "
-                    f"(weight: {FEATURE_BRANCH_WEIGHT:.1f})"
-                )
-            if dflt > 0:
-                loc_parts.append(
-                    f"{dflt}/{num_projects} on default branch "
-                    f"(weight: {DEFAULT_BRANCH_WEIGHT:.1f})"
-                )
-            breakdown_parts.append(f"{name}: {', '.join(loc_parts)}")
-        breakdown = "; ".join(breakdown_parts) if breakdown_parts else evidence
+            missing = num_projects - total_found
+            breakdown_parts.append(_artifact_breakdown(name, feat, dflt, missing, num_projects))
+        breakdown = " ".join(breakdown_parts) if breakdown_parts else evidence
 
         max_found_weight = 0.0
         for m in skill_maps:
