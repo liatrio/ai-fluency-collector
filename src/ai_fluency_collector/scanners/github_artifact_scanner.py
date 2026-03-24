@@ -173,7 +173,10 @@ class GitHubArtifactScanner:
         return best
 
     def _score_mcp_config(self, owner: str, repo: str) -> int:
-        """pm-advanced: .mcp.json or mcp.json with server definitions."""
+        """pm-advanced: MCP config files, custom MCP server dirs, settings.json mcpServers."""
+        best = 0
+
+        # Check .mcp.json / mcp.json
         for path in (".mcp.json", "mcp.json"):
             content = self.client.get_file_content(owner, repo, path)
             if content is None:
@@ -181,27 +184,52 @@ class GitHubArtifactScanner:
             try:
                 data = json.loads(content)
             except (json.JSONDecodeError, ValueError):
-                return 70  # present but unparseable — still counts
+                best = max(best, 70)  # present but unparseable — still counts
+                break
             servers = data.get("mcpServers") or data.get("servers") or {}
             if isinstance(servers, dict) and len(servers) > 1:
                 return 100
-            return 70
-        return 0
+            best = max(best, 70)
+            break
+
+        # Check custom MCP server directories (src/mcp/, mcp-servers/)
+        for dir_path in ("src/mcp", "mcp-servers"):
+            listing = self.client.get_directory_listing(owner, repo, dir_path)
+            if listing is not None:
+                return 100  # custom MCP server code = advanced
+
+        # Check .claude/settings.json for mcpServers key
+        if best < 100:
+            settings = self.client.get_file_content(owner, repo, ".claude/settings.json")
+            if settings:
+                try:
+                    data = json.loads(settings)
+                    mcp_servers = data.get("mcpServers") or {}
+                    if isinstance(mcp_servers, dict) and mcp_servers:
+                        if len(mcp_servers) > 1:
+                            return 100
+                        best = max(best, 70)
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+        return best
 
     def _score_ai_documentation(self, owner: str, repo: str) -> int:
         """ks-documentation: AI ADRs, AI usage guides, CONTRIBUTING.md mentions."""
         best = 0
 
-        # Check docs/adr/ for AI-related ADRs
-        adr_listing = self.client.get_directory_listing(owner, repo, "docs/adr")
-        if adr_listing is not None:
-            ai_adrs = [
-                e
-                for e in adr_listing
-                if e.get("type") == "file" and _AI_DOC_KEYWORDS.search(e.get("name", ""))
-            ]
-            if ai_adrs:
-                best = max(best, 80)
+        # Check docs/adr/ or docs/decisions/ for AI-related ADRs
+        for adr_path in ("docs/adr", "docs/decisions"):
+            adr_listing = self.client.get_directory_listing(owner, repo, adr_path)
+            if adr_listing is not None:
+                ai_adrs = [
+                    e
+                    for e in adr_listing
+                    if e.get("type") == "file" and _AI_DOC_KEYWORDS.search(e.get("name", ""))
+                ]
+                if ai_adrs:
+                    best = max(best, 80)
+                    break
 
         # Check docs/ for AI-named files
         docs_listing = self.client.get_directory_listing(owner, repo, "docs")
@@ -222,15 +250,32 @@ class GitHubArtifactScanner:
         return best
 
     def _score_workflows(self, owner: str, repo: str) -> dict[str, int]:
-        """tg-security-gates, sdlc-testing, ks-workflows from GitHub Actions."""
+        """tg-security-gates, sdlc-testing, ks-workflows from multiple sources."""
         workflow_contents = self.client.get_workflow_files(owner, repo)
-        if not workflow_contents:
-            return {"tg-security-gates": 0, "sdlc-testing": 0, "ks-workflows": 0}
+        combined = "\n".join(workflow_contents) if workflow_contents else ""
 
-        combined = "\n".join(workflow_contents)
-
-        # Security gates
+        # ── tg-security-gates: workflows + pre-commit hooks ──────────────────
         security_matches = set(m.group(0).lower() for m in _SECURITY_SCANNERS.finditer(combined))
+
+        # Also check .pre-commit-config.yaml and .githooks/ for security patterns
+        precommit = self.client.get_file_content(owner, repo, ".pre-commit-config.yaml")
+        if precommit:
+            security_matches |= set(
+                m.group(0).lower() for m in _SECURITY_SCANNERS.finditer(precommit)
+            )
+        githooks = self.client.get_directory_listing(owner, repo, ".githooks")
+        if githooks:
+            for entry in githooks:
+                if entry.get("type") == "file":
+                    hook_content = self.client.get_file_content(
+                        owner, repo, entry.get("path", "")
+                    )
+                    if hook_content:
+                        security_matches |= set(
+                            m.group(0).lower()
+                            for m in _SECURITY_SCANNERS.finditer(hook_content)
+                        )
+
         if len(security_matches) >= 2:
             security_score = 80
         elif security_matches:
@@ -238,11 +283,42 @@ class GitHubArtifactScanner:
         else:
             security_score = 0
 
-        # AI testing
-        testing_score = 70 if _AI_TEST_PATTERNS.search(combined) else 0
+        # ── sdlc-testing: AI test patterns in workflows ──────────────────────
+        testing_score = 70 if combined and _AI_TEST_PATTERNS.search(combined) else 0
 
-        # AI agent workflows
-        workflow_score = 80 if _AI_WORKFLOW_PATTERNS.search(combined) else 0
+        # ── ks-workflows: AI agent invocations in workflows, scripts, .claude/ ─
+        workflow_score = 0
+        if combined and _AI_WORKFLOW_PATTERNS.search(combined):
+            workflow_score = 80
+
+        # Check Makefile and scripts/ for AI tool orchestration
+        if workflow_score < 80:
+            makefile = self.client.get_file_content(owner, repo, "Makefile")
+            if makefile and _AI_WORKFLOW_PATTERNS.search(makefile):
+                workflow_score = max(workflow_score, 80)
+            scripts = self.client.get_directory_listing(owner, repo, "scripts")
+            if scripts and workflow_score < 80:
+                for entry in scripts:
+                    if entry.get("type") == "file":
+                        content = self.client.get_file_content(
+                            owner, repo, entry.get("path", "")
+                        )
+                        if content and _AI_WORKFLOW_PATTERNS.search(content):
+                            workflow_score = max(workflow_score, 80)
+                            break
+
+        # Check .claude/ for hooks/automation config
+        if workflow_score < 80:
+            claude_settings = self.client.get_file_content(
+                owner, repo, ".claude/settings.json"
+            )
+            if claude_settings:
+                try:
+                    data = json.loads(claude_settings)
+                    if data.get("hooks") or data.get("commands"):
+                        workflow_score = max(workflow_score, 70)
+                except (json.JSONDecodeError, ValueError):
+                    pass
 
         return {
             "tg-security-gates": security_score,

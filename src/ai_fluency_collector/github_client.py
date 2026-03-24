@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import time
 
 import requests
 
@@ -37,8 +38,21 @@ class GitHubClient:
         self.session.headers["Accept"] = "application/vnd.github+json"
         self.session.headers["X-GitHub-Api-Version"] = "2022-11-28"
 
+    _MAX_RETRIES = 3
+
     def _url(self, path: str) -> str:
         return f"{self.BASE_URL}{path}"
+
+    def _request(self, method: str, url: str, **kwargs) -> requests.Response:
+        """Issue an HTTP request with automatic retry on 429 rate-limit responses."""
+        for attempt in range(self._MAX_RETRIES):
+            resp = self.session.request(method, url, **kwargs)
+            if resp.status_code != 429:
+                return resp
+            retry_after = resp.headers.get("Retry-After")
+            wait = int(retry_after) if retry_after and retry_after.isdigit() else 2 ** attempt
+            time.sleep(wait)
+        return resp  # return last response even if still 429
 
     def _check_auth(self, resp: requests.Response, context: str) -> None:
         if resp.status_code == 401:
@@ -54,7 +68,7 @@ class GitHubClient:
     def validate_token(self) -> None:
         """Verify the token by calling GET /user."""
         try:
-            resp = self.session.get(self._url("/user"))
+            resp = self._request("GET", self._url("/user"))
         except (requests.ConnectionError, requests.Timeout) as e:
             raise GitHubAuthError(
                 "Could not connect to api.github.com. Check your network connection."
@@ -70,10 +84,13 @@ class GitHubClient:
     def get_file(self, owner: str, repo: str, path: str) -> dict | None:
         """Fetch file metadata + base64 content from the Contents API.
 
-        Returns the response dict, or None if the file does not exist.
+        Returns the response dict, or None if the file does not exist or is unreachable.
         """
         url = self._url(f"/repos/{owner}/{repo}/contents/{path}")
-        resp = self.session.get(url)
+        try:
+            resp = self._request("GET", url)
+        except (requests.ConnectionError, requests.Timeout):
+            return None
         _check_server_error(resp, f"fetching '{path}' from {owner}/{repo}")
         self._check_auth(resp, f"fetching '{path}'")
         if resp.status_code == 404:
@@ -94,9 +111,12 @@ class GitHubClient:
         return base64.b64decode(encoded).decode("utf-8", errors="replace")
 
     def get_directory_listing(self, owner: str, repo: str, path: str) -> list[dict] | None:
-        """List directory contents. Returns None if the path does not exist."""
+        """List directory contents. Returns None if the path does not exist or is unreachable."""
         url = self._url(f"/repos/{owner}/{repo}/contents/{path}")
-        resp = self.session.get(url)
+        try:
+            resp = self._request("GET", url)
+        except (requests.ConnectionError, requests.Timeout):
+            return None
         _check_server_error(resp, f"listing '{path}' in {owner}/{repo}")
         self._check_auth(resp, f"listing '{path}'")
         if resp.status_code == 404:
@@ -130,7 +150,8 @@ class GitHubClient:
         results: list[dict] = []
         page = 1
         while True:
-            resp = self.session.get(
+            resp = self._request(
+                "GET",
                 url,
                 params={"q": query, "per_page": 100, "page": page},
             )
@@ -151,7 +172,7 @@ class GitHubClient:
         results: list[dict] = []
         page = 1
         while True:
-            resp = self.session.get(url, params={"per_page": 100, "page": page})
+            resp = self._request("GET", url, params={"per_page": 100, "page": page})
             _check_server_error(resp, f"fetching reviews for PR #{number}")
             if resp.status_code == 404:
                 return []
@@ -169,7 +190,7 @@ class GitHubClient:
         results: list[dict] = []
         page = 1
         while True:
-            resp = self.session.get(url, params={"per_page": 100, "page": page})
+            resp = self._request("GET", url, params={"per_page": 100, "page": page})
             _check_server_error(resp, f"fetching review comments for PR #{number}")
             if resp.status_code == 404:
                 return []
@@ -187,7 +208,7 @@ class GitHubClient:
         results: list[dict] = []
         page = 1
         while True:
-            resp = self.session.get(url, params={"per_page": 100, "page": page})
+            resp = self._request("GET", url, params={"per_page": 100, "page": page})
             _check_server_error(resp, f"fetching files for PR #{number}")
             if resp.status_code == 404:
                 return []
@@ -205,7 +226,7 @@ class GitHubClient:
         results: list[dict] = []
         page = 1
         while True:
-            resp = self.session.get(url, params={"per_page": 100, "page": page})
+            resp = self._request("GET", url, params={"per_page": 100, "page": page})
             _check_server_error(resp, f"fetching commits for PR #{number}")
             if resp.status_code == 404:
                 return []
