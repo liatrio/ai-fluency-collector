@@ -319,3 +319,107 @@ def test_no_prs_returns_none_rates():
     assert metrics.review_comment_depth is None
     assert metrics.ai_coauthor_rate is None
     assert metrics.self_review_rate is None
+
+
+# ── Cross-repo PR scenarios ──────────────────────────────────────────────
+
+
+@responses.activate
+def test_authored_prs_across_multiple_repos():
+    """Metrics aggregate correctly when authored PRs come from different repos."""
+    _register_search(
+        [
+            _pr_item(1, owner="org", repo="frontend", login="alice"),
+            _pr_item(5, owner="org", repo="backend", login="alice"),
+        ]
+    )
+    # frontend PR #1: no comments (LGTM), no AI
+    _register_comments("org", "frontend", 1, [])
+    _register_reviews("org", "frontend", 1, [])
+    _register_commits("org", "frontend", 1, [])
+    # backend PR #5: has comments (not LGTM), has AI co-author
+    _register_comments(
+        "org",
+        "backend",
+        5,
+        [{"user": {"login": "bob"}, "path": "src/main.py", "created_at": "2026-03-16T10:00:00Z"}],
+    )
+    _register_reviews("org", "backend", 5, [])
+    _register_commits(
+        "org",
+        "backend",
+        5,
+        [
+            {
+                "commit": {
+                    "message": ("feat: api\n\nCo-authored-by: GitHub Copilot <copilot@github.com>")
+                }
+            }
+        ],
+    )
+    _register_search([])  # reviewed
+
+    client = GitHubClient("test-token")
+    scanner = GitHubReviewScanner(client)
+    metrics = scanner.scan(["alice"], "2026-W12")
+
+    assert metrics.total_authored_prs == 2
+    assert metrics.lgtm_rate == 0.5  # 1 of 2 LGTM
+    assert metrics.ai_coauthor_rate == 0.5  # 1 of 2 AI
+
+
+@responses.activate
+def test_reviewed_prs_across_multiple_repos():
+    """Review comment depth aggregates file coverage across repos."""
+    _register_search([])  # no authored PRs
+    _register_search(
+        [
+            _pr_item(10, owner="org", repo="frontend", login="bob"),
+            _pr_item(20, owner="org", repo="backend", login="carol"),
+        ]
+    )
+    # frontend PR #10: 2 changed files, alice commented on 1
+    _register_files("org", "frontend", 10, [{"filename": "src/a.tsx"}, {"filename": "src/b.tsx"}])
+    _register_comments(
+        "org",
+        "frontend",
+        10,
+        [{"user": {"login": "alice"}, "path": "src/a.tsx", "created_at": "2026-03-16T10:00:00Z"}],
+    )
+    # backend PR #20: 1 changed file, alice commented on it
+    _register_files("org", "backend", 20, [{"filename": "src/main.py"}])
+    _register_comments(
+        "org",
+        "backend",
+        20,
+        [{"user": {"login": "alice"}, "path": "src/main.py", "created_at": "2026-03-16T11:00:00Z"}],
+    )
+
+    client = GitHubClient("test-token")
+    scanner = GitHubReviewScanner(client)
+    metrics = scanner.scan(["alice"], "2026-W12")
+
+    # 2 of 3 total changed files have comments
+    assert metrics.review_comment_depth == 2 / 3
+
+
+# ── Empty period (scoring integration) ──────────────────────────────────
+
+
+@responses.activate
+def test_empty_period_produces_no_review_signals():
+    """When no PRs exist, calculate_github_review_scores returns no signals."""
+    from ai_fluency_collector.github_scoring import (
+        GITHUB_REVIEW_SKILL_MAPPINGS,
+        calculate_github_review_scores,
+    )
+
+    _register_search([])  # authored
+    _register_search([])  # reviewed
+
+    client = GitHubClient("test-token")
+    scanner = GitHubReviewScanner(client)
+    metrics = scanner.scan(["alice"], "2026-W12")
+    signals = calculate_github_review_scores(metrics, GITHUB_REVIEW_SKILL_MAPPINGS)
+
+    assert signals == []

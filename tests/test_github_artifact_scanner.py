@@ -316,3 +316,59 @@ def test_all_missing_returns_no_signals():
     signals = scanner.scan_repos(["org/empty"])
 
     assert signals == []
+
+
+# ── Private repo 403 handling ─────────────────────────────────────────────
+
+
+@responses.activate
+def test_403_on_file_fetch_raises_access_error():
+    """403 response when fetching a file raises GitHubAccessError."""
+    from ai_fluency_collector.github_client import GitHubAccessError
+
+    responses.add(
+        responses.GET,
+        _contents_url("org", "private", "CLAUDE.md"),
+        json={"message": "Forbidden"},
+        status=403,
+    )
+
+    client = GitHubClient("test-token")
+    scanner = GitHubArtifactScanner(client)
+
+    import pytest
+
+    with pytest.raises(GitHubAccessError, match="Access denied"):
+        scanner.scan_repo("org", "private")
+
+
+@responses.activate
+def test_403_on_directory_listing_raises_access_error():
+    """403 response when listing a directory raises GitHubAccessError."""
+    from ai_fluency_collector.github_client import GitHubAccessError
+
+    # Context files all 404 to reach prompt dir check
+    for path in (
+        "CLAUDE.md",
+        ".claude/CLAUDE.md",
+        ".cursorrules",
+        ".cursor/rules",
+        ".github/copilot-instructions.md",
+    ):
+        _register_missing("org", "private", path)
+    _register_missing("org", "private", ".claude/settings.json")
+    # 403 on directory listing
+    responses.add(
+        responses.GET,
+        _contents_url("org", "private", "prompts"),
+        json={"message": "Forbidden"},
+        status=403,
+    )
+
+    client = GitHubClient("test-token")
+    scanner = GitHubArtifactScanner(client)
+
+    import pytest
+
+    with pytest.raises(GitHubAccessError, match="Access denied"):
+        scanner.scan_repo("org", "private")
