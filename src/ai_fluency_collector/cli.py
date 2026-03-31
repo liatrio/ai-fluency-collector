@@ -20,6 +20,7 @@ from ai_fluency_collector.gitlab_client import (
 )
 from ai_fluency_collector.gitlab_scoring import (
     ARTIFACT_SKILL_MAPPINGS,
+    CI_EXECUTION_SKILL_MAPPINGS,
     CI_PIPELINE_SKILL_MAPPINGS,
     CI_SKILL_MAPPINGS,
     COVERAGE_SKILL_MAPPINGS,
@@ -28,6 +29,7 @@ from ai_fluency_collector.gitlab_scoring import (
     MR_CODING_TIME_SKILL_MAPPINGS,
     MR_SIZE_SKILL_MAPPINGS,
     REVIEW_SKILL_MAPPINGS,
+    calculate_ci_execution_scores,
     calculate_coverage_scores,
     calculate_member_scores,
     calculate_mr_coauthor_scores,
@@ -459,7 +461,33 @@ def scan(
         )
         click.echo(f"  → {len(coverage_signals)} coverage signals detected")
 
-        week_ci_signals = ci_signals + pipeline_signals + coverage_signals
+        # CI execution verification (check if configured patterns actually ran)
+        click.echo("  Checking CI job execution...")
+        execution_results = []
+        try:
+            for project, ci_result in zip(team.projects, ci_scan_results):
+                exec_result = ci_scanner.scan_ci_execution(project, week, ci_result)
+                execution_results.append(exec_result)
+        except _GITLAB_ERRORS as e:
+            raise click.ClickException(str(e)) from e
+
+        execution_signals = calculate_ci_execution_scores(
+            execution_results, CI_EXECUTION_SKILL_MAPPINGS
+        )
+        configured_count = sum(len(r.pattern_stats) for r in execution_results)
+        running_count = sum(
+            1
+            for r in execution_results
+            for _pid, (passed, ran, checked) in r.pattern_stats.items()
+            if ran > 0
+        )
+        if configured_count > 0:
+            click.echo(
+                f"  {running_count}/{configured_count} configured CI patterns verified as running"
+            )
+        click.echo(f"  → {len(execution_signals)} execution signals detected")
+
+        week_ci_signals = ci_signals + pipeline_signals + coverage_signals + execution_signals
 
         review_metrics = review_scanner.scan(effective_members, week)
         review_signals = calculate_review_scores(review_metrics, REVIEW_SKILL_MAPPINGS)

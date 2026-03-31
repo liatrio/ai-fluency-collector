@@ -255,6 +255,24 @@ def _check_ci_signals(
 
 
 @dataclass
+class CIExecutionResult:
+    """Per-pattern execution stats for a single project over a period."""
+
+    # {pattern_id: (ran_and_passed, ran_total, pipelines_checked)}
+    pattern_stats: dict[str, tuple[int, int, int]]
+
+
+# Map CI pattern IDs to the regex patterns used for job name matching
+_PATTERN_REGEXES: dict[str, re.Pattern] = {
+    "sast-dast": SAST_DAST_PATTERNS,
+    "secret-detection": SECRET_PATTERNS,
+    "ai-code-review": AI_REVIEW_PATTERNS,
+    "ai-test-generation": AI_TEST_PATTERNS,
+    "dependency-scanning": DEPENDENCY_PATTERNS,
+}
+
+
+@dataclass
 class CoverageResult:
     """Mean coverage percentage for a single project over a period."""
 
@@ -429,6 +447,68 @@ class CIScanner:
 
         return PipelinePassResult(pass_count=pass_count, total_count=total_count)
 
+    def scan_ci_execution(
+        self,
+        project_path: str,
+        period: str,
+        configured_patterns: dict[str, float],
+    ) -> CIExecutionResult:
+        """Check whether configured CI patterns actually ran in recent pipelines.
+
+        For each pattern that was detected in YAML config (weight > 0), checks
+        pipeline jobs to see if matching jobs actually executed and their pass rate.
+
+        Args:
+            project_path: GitLab project path (e.g. 'group/project').
+            period: Survey period in YYYY-WNN format.
+            configured_patterns: {pattern_id: weight} from scan_project().
+                Only patterns with weight > 0 are checked.
+
+        Returns:
+            CIExecutionResult with per-pattern execution stats.
+        """
+        # Only check patterns that are configured and have a regex to match
+        patterns_to_check = {
+            pid: regex
+            for pid, regex in _PATTERN_REGEXES.items()
+            if configured_patterns.get(pid, 0.0) > 0
+        }
+
+        if not patterns_to_check:
+            return CIExecutionResult(pattern_stats={})
+
+        start_date, end_date = _period_to_date_range(period)
+        pipelines = self.client.get_pipelines(
+            project_path, updated_after=start_date, updated_before=end_date
+        )
+
+        if not pipelines:
+            return CIExecutionResult(pattern_stats={})
+
+        # Cap at 20 most recent pipelines to limit API calls
+        pipelines_to_check = sorted(pipelines, key=lambda p: p.get("id", 0), reverse=True)[:20]
+
+        # Track per-pattern: (passed_count, ran_count, pipelines_checked)
+        stats: dict[str, list[int]] = {pid: [0, 0, 0] for pid in patterns_to_check}
+
+        for pipeline in pipelines_to_check:
+            pipeline_id = pipeline.get("id")
+            if pipeline_id is None:
+                continue
+            jobs = self.client.get_pipeline_jobs(project_path, pipeline_id)
+            for pid, regex in patterns_to_check.items():
+                stats[pid][2] += 1  # pipelines_checked
+                for job in jobs:
+                    job_name = job.get("name", "")
+                    if regex.search(job_name):
+                        stats[pid][1] += 1  # ran
+                        if job.get("status") == "success":
+                            stats[pid][0] += 1  # passed
+                        break  # one match per pipeline per pattern is enough
+
+        pattern_stats = {pid: (counts[0], counts[1], counts[2]) for pid, counts in stats.items()}
+        return CIExecutionResult(pattern_stats=pattern_stats)
+
     def scan_coverage(self, project_path: str, period: str) -> CoverageResult:
         """Fetch mean test coverage for a project over a survey period.
 
@@ -445,11 +525,7 @@ class CIScanner:
         start_date, _ = _period_to_date_range(period)
         jobs = self.client.get_jobs(project_path, scope="success", updated_after=start_date)
 
-        coverage_values = [
-            j["coverage"]
-            for j in jobs
-            if j.get("coverage") is not None
-        ]
+        coverage_values = [j["coverage"] for j in jobs if j.get("coverage") is not None]
 
         if not coverage_values:
             return CoverageResult(coverage=None)

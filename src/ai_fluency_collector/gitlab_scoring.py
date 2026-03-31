@@ -34,6 +34,30 @@ CI_SKILL_MAPPINGS: list[dict] = [
 ]
 
 
+# CI execution verification → skill mappings.
+# Maps the same pattern IDs as CI_SKILL_MAPPINGS, but scores based on whether
+# configured jobs actually ran and passed (not just present in YAML).
+# score_fn takes execution_rate (float 0.0–1.0) and returns an int score 0–100.
+CI_EXECUTION_SKILL_MAPPINGS: dict[str, list[dict]] = {
+    "sast-dast": [
+        {"skill_id": "sdlc-security", "score_fn": lambda rate: round(rate * 100)},
+        {"skill_id": "tg-security-gates", "score_fn": lambda rate: round(rate * 100)},
+    ],
+    "secret-detection": [
+        {"skill_id": "sdlc-security", "score_fn": lambda rate: round(rate * 100)},
+    ],
+    "ai-code-review": [
+        {"skill_id": "tg-code-review", "score_fn": lambda rate: round(rate * 100)},
+    ],
+    "ai-test-generation": [
+        {"skill_id": "sdlc-testing", "score_fn": lambda rate: round(rate * 100)},
+    ],
+    "dependency-scanning": [
+        {"skill_id": "sdlc-security", "score_fn": lambda rate: round(rate * 100)},
+    ],
+}
+
+
 # CI pipeline pass rate → skill mappings.
 # score_fn takes the mean first-attempt pass rate (float 0.0–1.0) and returns an int score 0–100.
 CI_PIPELINE_SKILL_MAPPINGS: dict[str, list[dict]] = {
@@ -76,6 +100,7 @@ MR_COAUTHOR_SKILL_MAPPINGS: dict[str, list[dict]] = {
     ],
 }
 
+
 # MR size → skill mappings (source: gitlab-mr).
 # score_fn takes the median lines changed (int) and returns an int score 0–100.
 def _pr_size_score(median_lines: float) -> int:
@@ -95,6 +120,7 @@ MR_SIZE_SKILL_MAPPINGS: dict[str, list[dict]] = {
         {"skill_id": "im-supervised-agent", "score_fn": _pr_size_score},
     ],
 }
+
 
 # MR coding time → skill mappings (source: gitlab-mr).
 # score_fn takes the median hours (float) and returns an int score 0–100.
@@ -148,12 +174,14 @@ def calculate_mr_signals(metrics, size_mappings: dict, coding_time_mappings: dic
             if score <= 0:
                 continue
             evidence = metrics.evidence.get(metric_key, "detected")
-            signals.append({
-                "skill_id": m["skill_id"],
-                "score": score,
-                "evidence": evidence,
-                "scoring_context": _rate_context(evidence),
-            })
+            signals.append(
+                {
+                    "skill_id": m["skill_id"],
+                    "score": score,
+                    "evidence": evidence,
+                    "scoring_context": _rate_context(evidence),
+                }
+            )
 
     return signals
 
@@ -182,12 +210,14 @@ def calculate_mr_size_scores(metrics, mappings: dict) -> list[dict]:
             if score <= 0:
                 continue
             evidence = metrics.evidence.get(metric_key, "detected")
-            signals.append({
-                "skill_id": m["skill_id"],
-                "score": score,
-                "evidence": evidence,
-                "scoring_context": _rate_context(evidence),
-            })
+            signals.append(
+                {
+                    "skill_id": m["skill_id"],
+                    "score": score,
+                    "evidence": evidence,
+                    "scoring_context": _rate_context(evidence),
+                }
+            )
 
     return signals
 
@@ -203,9 +233,7 @@ MEMBER_SKILL_MAPPINGS: list[dict] = [
 ]
 
 
-def _artifact_breakdown(
-    name: str, feat: int, dflt: int, missing: int, num_projects: int
-) -> str:
+def _artifact_breakdown(name: str, feat: int, dflt: int, missing: int, num_projects: int) -> str:
     """Build a human-readable breakdown sentence for an artifact signal.
 
     Args:
@@ -343,8 +371,8 @@ def calculate_pipeline_scores(
     if not projects_with_data:
         return []
 
-    mean_rate = (
-        sum(r.pass_count / r.total_count for r in projects_with_data) / len(projects_with_data)
+    mean_rate = sum(r.pass_count / r.total_count for r in projects_with_data) / len(
+        projects_with_data
     )
     total_pipelines = sum(r.total_count for r in projects_with_data)
     pct = round(mean_rate * 100)
@@ -356,14 +384,89 @@ def calculate_pipeline_scores(
             score = m["score_fn"](mean_rate)
             if score <= 0:
                 continue
-            signals.append({
-                "skill_id": m["skill_id"],
+            signals.append(
+                {
+                    "skill_id": m["skill_id"],
+                    "score": score,
+                    "evidence": evidence,
+                    "scoring_context": _rate_context(evidence),
+                }
+            )
+
+    return signals
+
+
+def calculate_ci_execution_scores(
+    execution_results: list,
+    mappings: dict[str, list[dict]],
+) -> list[dict]:
+    """Calculate skill scores from CI execution verification data.
+
+    For each configured CI pattern, computes the execution pass rate across
+    projects and maps it to skill scores. Only patterns that were configured
+    (detected in YAML) and have execution data are scored.
+
+    Args:
+        execution_results: List of CIExecutionResult objects (from CIScanner).
+        mappings: CI_EXECUTION_SKILL_MAPPINGS dict.
+
+    Returns:
+        List of {skill_id, score, evidence} dicts. Empty if no execution data.
+    """
+    if not execution_results:
+        return []
+
+    # Aggregate per-pattern stats across projects
+    aggregated: dict[str, list[int]] = {}  # pid -> [passed, ran, checked]
+    for result in execution_results:
+        for pid, (passed, ran, checked) in result.pattern_stats.items():
+            if pid not in aggregated:
+                aggregated[pid] = [0, 0, 0]
+            aggregated[pid][0] += passed
+            aggregated[pid][1] += ran
+            aggregated[pid][2] += checked
+
+    if not aggregated:
+        return []
+
+    # Track best score per skill_id to avoid duplicates
+    best_per_skill: dict[str, dict] = {}
+
+    for pid, counts in aggregated.items():
+        passed, ran, checked = counts
+        if checked == 0:
+            continue
+
+        skill_maps = mappings.get(pid, [])
+        if not skill_maps:
+            continue
+
+        execution_rate = ran / checked
+        pass_rate = passed / ran if ran > 0 else 0.0
+
+        if ran == 0:
+            evidence = f"{pid}: configured but not executed in {checked} pipelines checked"
+        else:
+            evidence = (
+                f"{pid}: ran in {ran}/{checked} pipelines, "
+                f"{passed}/{ran} passed ({round(pass_rate * 100)}% pass rate)"
+            )
+
+        for m in skill_maps:
+            score = m["score_fn"](execution_rate * pass_rate)
+            if score <= 0:
+                continue
+            skill_id = m["skill_id"]
+            entry = {
+                "skill_id": skill_id,
                 "score": score,
                 "evidence": evidence,
                 "scoring_context": _rate_context(evidence),
-            })
+            }
+            if skill_id not in best_per_skill or score > best_per_skill[skill_id]["score"]:
+                best_per_skill[skill_id] = entry
 
-    return signals
+    return list(best_per_skill.values())
 
 
 def calculate_mr_coauthor_scores(metrics, mappings: dict) -> list[dict]:
@@ -394,12 +497,14 @@ def calculate_mr_coauthor_scores(metrics, mappings: dict) -> list[dict]:
             if score <= 0:
                 continue
             evidence = metrics.evidence.get(metric_key, "detected")
-            signals.append({
-                "skill_id": m["skill_id"],
-                "score": score,
-                "evidence": evidence,
-                "scoring_context": _rate_context(evidence),
-            })
+            signals.append(
+                {
+                    "skill_id": m["skill_id"],
+                    "score": score,
+                    "evidence": evidence,
+                    "scoring_context": _rate_context(evidence),
+                }
+            )
 
     return signals
 
@@ -433,12 +538,14 @@ def calculate_review_scores(metrics, mappings: dict) -> list[dict]:
             if score <= 0:
                 continue
             evidence = metrics.evidence.get(metric_key, "detected")
-            signals.append({
-                "skill_id": m["skill_id"],
-                "score": score,
-                "evidence": evidence,
-                "scoring_context": _rate_context(evidence),
-            })
+            signals.append(
+                {
+                    "skill_id": m["skill_id"],
+                    "score": score,
+                    "evidence": evidence,
+                    "scoring_context": _rate_context(evidence),
+                }
+            )
 
     return signals
 
@@ -522,14 +629,10 @@ def calculate_member_scores(
 
         # scoring_context: what score if all members had each found pattern?
         max_found_weight = sum(
-            m["weight"]
-            for m in skill_maps
-            if pattern_member_counts.get(m["artifact_id"], 0) > 0
+            m["weight"] for m in skill_maps if pattern_member_counts.get(m["artifact_id"], 0) > 0
         )
         max_signal = (
-            round(min(100.0, (max_found_weight / total_weight) * 100.0))
-            if total_weight > 0
-            else 0
+            round(min(100.0, (max_found_weight / total_weight) * 100.0)) if total_weight > 0 else 0
         )
         breakdown = evidence  # member fraction already described in evidence
         missing_signals = list(
@@ -542,12 +645,14 @@ def calculate_member_scores(
         ctx: dict = {"breakdown": breakdown, "max_from_this_signal": max_signal}
         if missing_signals:
             ctx["missing_signals"] = missing_signals
-        signals.append({
-            "skill_id": skill_id,
-            "score": score,
-            "evidence": evidence,
-            "scoring_context": ctx,
-        })
+        signals.append(
+            {
+                "skill_id": skill_id,
+                "score": score,
+                "evidence": evidence,
+                "scoring_context": ctx,
+            }
+        )
 
     return signals
 
@@ -674,11 +779,13 @@ def calculate_scores(
         ctx: dict = {"breakdown": breakdown, "max_from_this_signal": max_signal}
         if missing_signals:
             ctx["missing_signals"] = missing_signals
-        signals.append({
-            "skill_id": skill_id,
-            "score": score,
-            "evidence": evidence,
-            "scoring_context": ctx,
-        })
+        signals.append(
+            {
+                "skill_id": skill_id,
+                "score": score,
+                "evidence": evidence,
+                "scoring_context": ctx,
+            }
+        )
 
     return signals
