@@ -140,14 +140,14 @@ def test_gitlab_api_not_found(mock_client_cls, tmp_path, monkeypatch):
 
     monkeypatch.setenv("GITLAB_TOKEN", "test-token")
     mock_client_cls.return_value.validate_token.side_effect = GitLabAuthError(
-        "GitLab API endpoint not found at https://gitlab.example.com/api/v4/user. "
+        "GitLab API not reachable at https://gitlab.example.com. "
         "Check that gitlab_url in your config points to a valid GitLab instance."
     )
     config_path = _write_valid_config(tmp_path)
     runner = CliRunner()
     result = runner.invoke(main, ["scan", "--config", config_path, "--period", "2026-W12"])
     assert result.exit_code != 0
-    assert "not found" in result.output
+    assert "not reachable" in result.output
 
 
 @patch("ai_fluency_collector.cli.MemberScanner")

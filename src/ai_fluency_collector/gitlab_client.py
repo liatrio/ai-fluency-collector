@@ -106,31 +106,39 @@ class GitLabClient:
     def validate_token(self) -> None:
         """Verify the token is valid by calling GET /user.
 
+        Falls back to GET /version if /user returns 404, which happens on
+        some self-hosted GitLab instances that restrict the /user endpoint.
+
         Raises GitLabAuthError on 401 or connection errors.
         """
-        try:
-            resp = self.session.get(self._api_url("/user"), timeout=self.timeout)
-        except requests.Timeout as e:
-            raise GitLabAuthError(
-                f"Could not connect to {self.base_url} (timed out after {self.timeout}s). "
-                "Check the gitlab_url in your config."
-            ) from e
-        except (requests.ConnectionError, requests.exceptions.MissingSchema) as e:
-            raise GitLabAuthError(
-                f"Could not connect to {self.base_url}. Check the gitlab_url in your config."
-            ) from e
-        _check_server_error(resp, "validating token")
-        if resp.status_code == 401:
-            raise GitLabAuthError(
-                f"GitLab authentication failed at {self.base_url}. "
-                "Check that GITLAB_TOKEN is valid and has read_api scope."
-            )
-        if resp.status_code == 404:
-            raise GitLabAuthError(
-                f"GitLab API endpoint not found at {self.base_url}/api/v4/user. "
-                "Check that gitlab_url in your config points to a valid GitLab instance."
-            )
-        resp.raise_for_status()
+        endpoints = ["/user", "/version"]
+        for endpoint in endpoints:
+            try:
+                resp = self.session.get(self._api_url(endpoint), timeout=self.timeout)
+            except requests.Timeout as e:
+                raise GitLabAuthError(
+                    f"Could not connect to {self.base_url} (timed out after {self.timeout}s). "
+                    "Check the gitlab_url in your config."
+                ) from e
+            except (requests.ConnectionError, requests.exceptions.MissingSchema) as e:
+                raise GitLabAuthError(
+                    f"Could not connect to {self.base_url}. Check the gitlab_url in your config."
+                ) from e
+            _check_server_error(resp, "validating token")
+            if resp.status_code == 401:
+                raise GitLabAuthError(
+                    f"GitLab authentication failed at {self.base_url}. "
+                    "Check that GITLAB_TOKEN is valid and has read_api scope."
+                )
+            if resp.status_code == 404:
+                continue  # try next endpoint
+            resp.raise_for_status()
+            return
+        # All endpoints returned 404
+        raise GitLabAuthError(
+            f"GitLab API not reachable at {self.base_url}. "
+            "Check that gitlab_url in your config points to a valid GitLab instance."
+        )
 
     def check_file_exists(self, project_path: str, file_path: str, ref: str = "HEAD") -> bool:
         """Check if a file exists in a project on a given ref.
