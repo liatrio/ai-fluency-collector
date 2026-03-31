@@ -125,6 +125,11 @@ class GitLabClient:
                 f"GitLab authentication failed at {self.base_url}. "
                 "Check that GITLAB_TOKEN is valid and has read_api scope."
             )
+        if resp.status_code == 404:
+            raise GitLabAuthError(
+                f"GitLab API endpoint not found at {self.base_url}/api/v4/user. "
+                "Check that gitlab_url in your config points to a valid GitLab instance."
+            )
         resp.raise_for_status()
 
     def check_file_exists(self, project_path: str, file_path: str, ref: str = "HEAD") -> bool:
