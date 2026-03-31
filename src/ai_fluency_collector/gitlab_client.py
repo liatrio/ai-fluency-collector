@@ -57,9 +57,7 @@ def _check_rate_limit(resp: requests.Response, context: str = "") -> None:
             )
         except (ValueError, OSError):
             pass
-    raise GitLabRateLimitError(
-        "GitLab rate limit reached. Wait a moment and retry."
-    )
+    raise GitLabRateLimitError("GitLab rate limit reached. Wait a moment and retry.")
 
 
 class GitLabClient:
@@ -532,9 +530,7 @@ class GitLabClient:
         page = 1
         while True:
             params["page"] = page
-            resp = self._get(
-                url, params=params, context=f"listing pipelines for '{project_path}'"
-            )
+            resp = self._get(url, params=params, context=f"listing pipelines for '{project_path}'")
             _check_server_error(resp, f"listing pipelines for '{project_path}'")
             if resp.status_code == 404:
                 return []
@@ -548,6 +544,40 @@ class GitLabClient:
                     f"Access denied to project '{project_path}'. "
                     "Check that the token has access to this project."
                 )
+            resp.raise_for_status()
+            items = resp.json()
+            if not items:
+                break
+            results.extend(items)
+            page += 1
+        return results
+
+    def get_pipeline_jobs(
+        self,
+        project_path: str,
+        pipeline_id: int,
+    ) -> list[dict]:
+        """Get jobs for a specific pipeline.
+
+        Returns list of job dicts with 'name', 'stage', 'status', 'duration'.
+        """
+        encoded_project = self._encode_project(project_path)
+        url = self._api_url(f"/projects/{encoded_project}/pipelines/{pipeline_id}/jobs")
+        params: dict = {"per_page": 100}
+        results: list[dict] = []
+        page = 1
+        while True:
+            params["page"] = page
+            resp = self._get(
+                url,
+                params=params,
+                context=f"listing jobs for pipeline {pipeline_id} in '{project_path}'",
+            )
+            _check_server_error(
+                resp, f"listing jobs for pipeline {pipeline_id} in '{project_path}'"
+            )
+            if resp.status_code == 404:
+                return []
             resp.raise_for_status()
             items = resp.json()
             if not items:
