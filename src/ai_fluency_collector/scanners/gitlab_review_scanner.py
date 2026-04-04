@@ -105,6 +105,7 @@ class ReviewScanner:
         project_total: dict[str, int] = {}
         project_lgtm: dict[str, int] = {}
         project_ai_mrs: dict[str, int] = {}
+        project_self_review: dict[str, int] = {}
         all_projects: set[str] = set()
 
         # Reviewer aggregates (comment depth)
@@ -177,6 +178,7 @@ class ReviewScanner:
                     ]
                     if author_early_notes:
                         self_reviewed_count += 1
+                        project_self_review[proj_name] = project_self_review.get(proj_name, 0) + 1
 
             # ── Reviewed MRs ─────────────────────────────────────────────────
             reviewed_mrs = self.client.search_merge_requests(
@@ -286,6 +288,7 @@ class ReviewScanner:
                 "total": total,
                 "lgtm": project_lgtm.get(proj_name, 0),
                 "ai_mrs": project_ai_mrs.get(proj_name, 0),
+                "self_review": project_self_review.get(proj_name, 0),
             }
 
         # Build tool_breakdown from counts
