@@ -61,6 +61,8 @@ class ReviewMetrics:
     evidence: dict[str, str] = field(default_factory=dict)
     per_project: dict[str, dict] = field(default_factory=dict)
     """Per-project MR review metrics for scoring_context."""
+    tool_breakdown: dict[str, int] = field(default_factory=dict)
+    """Per-tool MR counts: {tool_name: mr_count}"""
 
 
 def _project_name_from_mr(mr: dict) -> str:
@@ -293,6 +295,13 @@ class ReviewScanner:
                 "ai_mrs": project_ai_mrs.get(proj_name, 0),
             }
 
+        # Build tool_breakdown from counts
+        tool_breakdown = {
+            p["name"]: tool_mr_counts[p["id"]]
+            for p in MR_AI_COAUTHOR_PATTERNS
+            if tool_mr_counts[p["id"]] > 0
+        }
+
         return ReviewMetrics(
             lgtm_rate=lgtm_rate,
             review_comment_depth=review_depth,
@@ -302,4 +311,5 @@ class ReviewScanner:
             mr_agentic_coauthor_rate=mr_agentic_coauthor_rate,
             evidence=evidence,
             per_project=per_project,
+            tool_breakdown=tool_breakdown,
         )

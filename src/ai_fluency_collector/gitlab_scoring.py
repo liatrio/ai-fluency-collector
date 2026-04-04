@@ -252,6 +252,7 @@ def _artifact_breakdown(
     default_projects: list[str] | None = None,
     feature_projects: list[str] | None = None,
     missing_projects: list[str] | None = None,
+    branch_names: dict[str, str] | None = None,
 ) -> str:
     """Build a human-readable breakdown sentence for an artifact signal.
 
@@ -264,6 +265,7 @@ def _artifact_breakdown(
         default_projects: Project names where artifact was found on default branch.
         feature_projects: Project names where artifact was found on feature branch only.
         missing_projects: Project names where artifact was not found.
+        branch_names: Optional {project_path: branch_name} for actual branch names.
     """
     total_found = feat + dflt
 
@@ -272,6 +274,13 @@ def _artifact_breakdown(
         if not projects:
             return ""
         return ", ".join(_short_name(p) for p in projects)
+
+    def _proj_with_branch(p: str, branch_type: str) -> str:
+        """Format project name with branch info, using actual name if available."""
+        short = _short_name(p)
+        if branch_names and p in branch_names:
+            return f"{short} ({branch_names[p]})"
+        return f"{short} ({branch_type})"
 
     if total_found == num_projects:
         # Found everywhere
@@ -285,7 +294,8 @@ def _artifact_breakdown(
         if feat == num_projects:
             proj_detail = ""
             if feature_projects:
-                proj_detail = f": {_proj_list(feature_projects)}"
+                parts = [_proj_with_branch(p, "feature") for p in feature_projects]
+                proj_detail = f": {', '.join(parts)}"
             return (
                 f"{name} found in all {num_projects} projects{proj_detail}, "
                 f"but only on feature branches. "
@@ -295,9 +305,11 @@ def _artifact_breakdown(
         dflt_detail = ""
         feat_detail = ""
         if default_projects:
-            dflt_detail = f" ({_proj_list(default_projects)})"
+            parts = [_proj_with_branch(p, "default") for p in default_projects]
+            dflt_detail = f" ({', '.join(parts)})"
         if feature_projects:
-            feat_detail = f" ({_proj_list(feature_projects)})"
+            parts = [_proj_with_branch(p, "feature") for p in feature_projects]
+            feat_detail = f" ({', '.join(parts)})"
         return (
             f"{name} found in all {num_projects} projects — "
             f"{dflt} on the default branch{dflt_detail}, "
@@ -325,10 +337,10 @@ def _artifact_breakdown(
         if default_projects or feature_projects:
             found_names = []
             if default_projects:
-                found_names.extend(f"{_short_name(p)} (default branch)" for p in default_projects)
+                found_names.extend(_proj_with_branch(p, "default branch") for p in default_projects)
             if feature_projects:
                 found_names.extend(
-                    f"{_short_name(p)} (feature branch only)" for p in feature_projects
+                    _proj_with_branch(p, "feature branch only") for p in feature_projects
                 )
             found_detail = f": {', '.join(found_names)}"
         if missing_projects:
@@ -425,7 +437,11 @@ def calculate_coverage_scores(
     if project_names:
         for i, r in current_with_data:
             if i < len(project_names):
-                per_project[project_names[i]] = {"coverage_pct": round(r.coverage, 1)}
+                entry: dict = {"coverage_pct": round(r.coverage, 1)}
+                job_names = getattr(r, "job_names", [])
+                if job_names:
+                    entry["jobs"] = job_names
+                per_project[project_names[i]] = entry
 
     signals = []
     for m in mappings:
@@ -540,6 +556,7 @@ def calculate_ci_execution_scores(
     # Aggregate per-pattern stats across projects and track which projects ran each pattern
     aggregated: dict[str, list[int]] = {}  # pid -> [passed, ran, checked]
     pattern_projects: dict[str, list[str]] = {}  # pid -> project names with executions
+    pattern_failed_jobs: dict[str, list[str]] = {}  # pid -> failed job names
     for idx, result in enumerate(execution_results):
         proj_name = project_names[idx] if project_names and idx < len(project_names) else None
         for pid, (passed, ran, checked) in result.pattern_stats.items():
@@ -550,6 +567,9 @@ def calculate_ci_execution_scores(
             aggregated[pid][2] += checked
             if proj_name and ran > 0:
                 pattern_projects.setdefault(pid, []).append(proj_name)
+        # Collect failed job names
+        for pid, jobs in getattr(result, "failed_jobs", {}).items():
+            pattern_failed_jobs.setdefault(pid, []).extend(jobs)
 
     if not aggregated:
         return []
@@ -582,16 +602,22 @@ def calculate_ci_execution_scores(
                 f"{proj_detail}"
             )
 
+        # Deduplicate failed job names for this pattern
+        failed = sorted(set(pattern_failed_jobs.get(pid, [])))
+
         for m in skill_maps:
             score = m["score_fn"](execution_rate * pass_rate)
             if score <= 0:
                 continue
             skill_id = m["skill_id"]
+            ctx = _rate_context(evidence)
+            if failed:
+                ctx["failed_jobs"] = failed
             entry = {
                 "skill_id": skill_id,
                 "score": score,
                 "evidence": evidence,
-                "scoring_context": _rate_context(evidence),
+                "scoring_context": ctx,
             }
             if skill_id not in best_per_skill or score > best_per_skill[skill_id]["score"]:
                 best_per_skill[skill_id] = entry
@@ -618,6 +644,7 @@ def calculate_mr_coauthor_scores(metrics, mappings: dict) -> list[dict]:
     }
 
     per_project = getattr(metrics, "per_project", None)
+    tool_breakdown = getattr(metrics, "tool_breakdown", None)
 
     signals: list[dict] = []
     for metric_key, skill_maps in mappings.items():
@@ -632,6 +659,8 @@ def calculate_mr_coauthor_scores(metrics, mappings: dict) -> list[dict]:
             ctx = _rate_context(evidence)
             if per_project:
                 ctx["per_project"] = per_project
+            if tool_breakdown:
+                ctx["tool_breakdown"] = tool_breakdown
             signals.append(
                 {
                     "skill_id": m["skill_id"],
@@ -876,13 +905,22 @@ def calculate_scores(
         artifact_default_projects: dict[str, list[str]] = defaultdict(list)
         artifact_feature_projects: dict[str, list[str]] = defaultdict(list)
         artifact_missing_projects: dict[str, list[str]] = defaultdict(list)
+        # Track actual branch names per project per artifact
+        artifact_branch_names: dict[str, dict[str, str]] = defaultdict(dict)
 
         for idx, project_result in enumerate(scan_results):
             proj_name = project_names[idx] if project_names and idx < len(project_names) else None
             found_weight = 0.0
             for m in skill_maps:
                 aid = m["artifact_id"]
-                value = project_result.get(aid, False)
+                raw = project_result.get(aid, False)
+                # Support both old format (float/bool) and new format (dict)
+                if isinstance(raw, dict):
+                    value = raw.get("weight", 0.0)
+                    branch_name = raw.get("branch")
+                else:
+                    value = raw
+                    branch_name = None
                 if isinstance(value, (int, float)) and value > 0:
                     found_weight += m["weight"] * value
                     artifact_counts[aid] += 1
@@ -890,10 +928,14 @@ def calculate_scores(
                         feature_counts[aid] += 1
                         if proj_name:
                             artifact_feature_projects[aid].append(proj_name)
+                            if branch_name:
+                                artifact_branch_names[aid][proj_name] = branch_name
                     elif value >= DEFAULT_BRANCH_WEIGHT:
                         default_counts[aid] += 1
                         if proj_name:
                             artifact_default_projects[aid].append(proj_name)
+                            if branch_name:
+                                artifact_branch_names[aid][proj_name] = branch_name
                 elif value is True:
                     found_weight += m["weight"]
                     artifact_counts[aid] += 1
@@ -953,19 +995,25 @@ def calculate_scores(
                     default_projects=artifact_default_projects.get(aid),
                     feature_projects=artifact_feature_projects.get(aid),
                     missing_projects=artifact_missing_projects.get(aid),
+                    branch_names=artifact_branch_names.get(aid),
                 )
             )
 
             # Build per_project data for this artifact
             if project_names:
+                branch_names = artifact_branch_names.get(aid, {})
                 for p in artifact_default_projects.get(aid, []):
                     per_project.setdefault(p, {})["found"] = True
                     per_project[p]["branch"] = "default"
                     per_project[p]["weight"] = DEFAULT_BRANCH_WEIGHT
+                    if p in branch_names:
+                        per_project[p]["branch_name"] = branch_names[p]
                 for p in artifact_feature_projects.get(aid, []):
                     per_project.setdefault(p, {})["found"] = True
                     per_project[p]["branch"] = "feature"
                     per_project[p]["weight"] = FEATURE_BRANCH_WEIGHT
+                    if p in branch_names:
+                        per_project[p]["branch_name"] = branch_names[p]
                 for p in artifact_missing_projects.get(aid, []):
                     per_project.setdefault(p, {})["found"] = False
 
@@ -974,7 +1022,13 @@ def calculate_scores(
         max_found_weight = 0.0
         for m in skill_maps:
             aid = m["artifact_id"]
-            best = max((float(r.get(aid, 0)) for r in scan_results), default=0.0)
+
+            def _extract_weight(raw):
+                if isinstance(raw, dict):
+                    return float(raw.get("weight", 0))
+                return float(raw) if raw else 0.0
+
+            best = max((_extract_weight(r.get(aid, 0)) for r in scan_results), default=0.0)
             if best > 0:
                 max_found_weight += m["weight"] * best
         max_signal = (

@@ -306,7 +306,7 @@ def test_github_artifact_scoring_context_present():
     client = GitHubClient("test-token")
     scanner = GitHubArtifactScanner(client)
     # Patch scan_repo to return a known score without making HTTP calls
-    scanner.scan_repo = lambda owner, repo: {"ks-patterns": 75}
+    scanner.scan_repo = lambda owner, repo: {"ks-patterns": {"score": 75, "detail": ""}}
     signals = scanner.scan_repos(["owner/repo"])
 
     assert len(signals) == 1
@@ -473,7 +473,13 @@ def test_github_artifact_per_repo_in_scoring_context():
 
     client = GitHubClient("test-token")
     scanner = GitHubArtifactScanner(client)
-    scanner.scan_repo = lambda owner, repo: {"ks-patterns": 75 if repo == "repo1" else 0}
+
+    def _mock_scan(owner, repo):
+        if repo == "repo1":
+            return {"ks-patterns": {"score": 75, "detail": ""}}
+        return {"ks-patterns": {"score": 0, "detail": ""}}
+
+    scanner.scan_repo = _mock_scan
     signals = scanner.scan_repos(["org/repo1", "org/repo2"])
 
     assert len(signals) == 1
@@ -492,7 +498,13 @@ def test_github_artifact_evidence_includes_missing_repos():
 
     client = GitHubClient("test-token")
     scanner = GitHubArtifactScanner(client)
-    scanner.scan_repo = lambda owner, repo: {"ks-patterns": 75 if repo == "repo1" else 0}
+
+    def _mock_scan(owner, repo):
+        if repo == "repo1":
+            return {"ks-patterns": {"score": 75, "detail": ""}}
+        return {"ks-patterns": {"score": 0, "detail": ""}}
+
+    scanner.scan_repo = _mock_scan
     signals = scanner.scan_repos(["org/repo1", "org/repo2"])
 
     assert "Missing: org/repo2" in signals[0]["evidence"]

@@ -45,6 +45,7 @@ def calculate_github_review_scores(metrics, mappings: dict) -> list[dict]:
     }
 
     per_repo = getattr(metrics, "per_repo", None)
+    tool_breakdown = getattr(metrics, "tool_breakdown", None)
 
     signals: list[dict] = []
     for metric_key, skill_maps in mappings.items():
@@ -59,6 +60,8 @@ def calculate_github_review_scores(metrics, mappings: dict) -> list[dict]:
             ctx = _rate_context(evidence)
             if per_repo:
                 ctx["per_repo"] = per_repo
+            if tool_breakdown:
+                ctx["tool_breakdown"] = tool_breakdown
             signals.append(
                 {
                     "skill_id": m["skill_id"],

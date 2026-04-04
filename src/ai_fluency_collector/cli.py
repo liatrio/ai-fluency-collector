@@ -336,12 +336,18 @@ def scan(
 
     for project, result in zip(team.projects, artifact_scan_results):
         if verbose:
-            for aid, weight in result.items():
-                if weight > 0:
-                    click.echo(f"      found {aid} (weight={weight})")
+            for aid, info in result.items():
+                w = info["weight"] if isinstance(info, dict) else info
+                if w > 0:
+                    branch = info.get("branch", "") if isinstance(info, dict) else ""
+                    click.echo(f"      found {aid} (weight={w}, branch={branch})")
 
         all_artifact_results.append(result)
-        found = [aid for aid, present in result.items() if present]
+        found = [
+            aid
+            for aid, info in result.items()
+            if (info["weight"] > 0 if isinstance(info, dict) else info)
+        ]
         if found:
             names = []
             for aid in found:
@@ -373,7 +379,15 @@ def scan(
 
     for project, result in zip(team.projects, ci_scan_results):
         all_ci_results.append(result)
-        found = [pid for pid in CI_PATTERN_IDS if result.get(pid, False)]
+        found = [
+            pid
+            for pid in CI_PATTERN_IDS
+            if (
+                result.get(pid, {}).get("weight", 0) > 0
+                if isinstance(result.get(pid), dict)
+                else result.get(pid, False)
+            )
+        ]
         if found:
             click.echo(f"  {project}: {', '.join(found)}")
         else:

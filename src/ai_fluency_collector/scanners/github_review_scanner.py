@@ -53,6 +53,8 @@ class GitHubReviewMetrics:
     evidence: dict[str, str] = field(default_factory=dict)
     per_repo: dict[str, dict] = field(default_factory=dict)
     """Per-repo PR review metrics for scoring_context."""
+    tool_breakdown: dict[str, int] = field(default_factory=dict)
+    """Per-tool PR counts: {tool_name: pr_count}"""
 
 
 class GitHubReviewScanner:
@@ -88,6 +90,7 @@ class GitHubReviewScanner:
         self_reviewed_count = 0
         ai_coauthor_count = 0
         ai_agent_count = 0
+        tool_pr_counts: dict[str, int] = {}  # tool_name → PR count
 
         # Per-repo tracking
         repo_total: dict[str, int] = {}
@@ -140,20 +143,27 @@ class GitHubReviewScanner:
                 commits = self.client.get_pr_commits(owner, repo, number)
                 has_ai = False
                 has_agent = False
+                pr_tools: set[str] = set()
                 for commit in commits:
                     message = commit.get("commit", {}).get("message", "")
                     if _CLAUDE_AGENT_PATTERN.search(message):
                         has_agent = True
                         has_ai = True
-                    elif (
-                        _CLAUDE_PATTERN.search(message)
-                        or _COPILOT_PATTERN.search(message)
-                        or _CURSOR_PATTERN.search(message)
-                    ):
+                        pr_tools.add("Claude Code")
+                    elif _CLAUDE_PATTERN.search(message):
                         has_ai = True
+                        pr_tools.add("Claude")
+                    if _COPILOT_PATTERN.search(message):
+                        has_ai = True
+                        pr_tools.add("GitHub Copilot")
+                    if _CURSOR_PATTERN.search(message):
+                        has_ai = True
+                        pr_tools.add("Cursor")
                 if has_ai:
                     ai_coauthor_count += 1
                     repo_ai[repo_str] = repo_ai.get(repo_str, 0) + 1
+                    for tool in pr_tools:
+                        tool_pr_counts[tool] = tool_pr_counts.get(tool, 0) + 1
                 if has_agent:
                     ai_agent_count += 1
 
@@ -243,4 +253,5 @@ class GitHubReviewScanner:
             total_authored_prs=total_authored,
             evidence=evidence,
             per_repo=per_repo,
+            tool_breakdown=tool_pr_counts,
         )
