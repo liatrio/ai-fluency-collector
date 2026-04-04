@@ -188,10 +188,11 @@ class ReviewScanner:
 
             for mr in reviewed_mrs:
                 # Filter to configured projects if set
+                reviewed_proj = project_name_from_mr(mr)
                 if self._project_filter:
-                    rp = project_name_from_mr(mr)
-                    if rp.lower() not in self._project_filter:
+                    if reviewed_proj.lower() not in self._project_filter:
                         continue
+                all_projects.add(reviewed_proj)
                 project_id = mr["project_id"]
                 mr_iid = mr["iid"]
 

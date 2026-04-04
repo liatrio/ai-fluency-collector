@@ -749,19 +749,16 @@ def calculate_member_scores(
     # Count how many members have each pattern
     pattern_member_counts: dict[str, int] = defaultdict(int)
     pattern_total_commits: dict[str, int] = defaultdict(int)
-    # Aggregate per-repo commit counts across all members (team-level only, no usernames)
-    repo_commit_counts: dict[str, int] = defaultdict(int)
+    # Per-pattern repo commit counts: {pattern_id: {repo_name: commit_count}}
+    pattern_repo_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for result in member_results:
         for pattern_id, count in result.ai_coauthor_counts.items():
             if count > 0:
                 pattern_member_counts[pattern_id] += 1
                 pattern_total_commits[pattern_id] += count
         for repo_name, counts in getattr(result, "repo_coauthor_counts", {}).items():
-            for count in counts.values():
-                repo_commit_counts[repo_name] += count
-
-    # Build repos_with_activity sorted by commit count desc
-    repos_with_activity = sorted(repo_commit_counts.keys(), key=lambda r: -repo_commit_counts[r])
+            for pattern_id, count in counts.items():
+                pattern_repo_counts[pattern_id][repo_name] += count
 
     # Group mappings by skill_id
     skill_mappings: dict[str, list[dict]] = defaultdict(list)
@@ -774,6 +771,8 @@ def calculate_member_scores(
         found_weight = 0.0
         total_weight = 0.0
         evidence_parts = []
+        # Aggregate repos for this skill's patterns only
+        skill_repo_counts: dict[str, int] = defaultdict(int)
 
         for m in skill_maps:
             aid = m["artifact_id"]
@@ -794,10 +793,14 @@ def calculate_member_scores(
                         name = p["name"]
                         break
 
-                # Include repo names in evidence
+                # Build per-pattern repo detail
+                pattern_repos = pattern_repo_counts.get(aid, {})
+                for repo, cnt in pattern_repos.items():
+                    skill_repo_counts[repo] += cnt
                 repo_detail = ""
-                if repos_with_activity:
-                    short_names = [_short_name(r) for r in repos_with_activity]
+                if pattern_repos:
+                    sorted_repos = sorted(pattern_repos.keys(), key=lambda r: -pattern_repos[r])
+                    short_names = [_short_name(r) for r in sorted_repos]
                     repo_detail = f" across {', '.join(short_names)}"
 
                 evidence_parts.append(
@@ -834,10 +837,16 @@ def calculate_member_scores(
         ctx: dict = {"breakdown": breakdown, "max_from_this_signal": max_signal}
         if missing_signals:
             ctx["missing_signals"] = missing_signals
-        if repos_with_activity:
-            ctx["repos_with_activity"] = repos_with_activity
-            ctx["total_commits"] = sum(repo_commit_counts.values())
-            ctx["members_with_activity"] = sum(1 for r in member_results if r.ai_coauthor_counts)
+        skill_repos_sorted = sorted(skill_repo_counts.keys(), key=lambda r: -skill_repo_counts[r])
+        if skill_repos_sorted:
+            ctx["repos_with_activity"] = skill_repos_sorted
+            ctx["total_commits"] = sum(skill_repo_counts.values())
+            skill_aids = {m["artifact_id"] for m in skill_maps}
+            ctx["members_with_activity"] = sum(
+                1
+                for r in member_results
+                if any(r.ai_coauthor_counts.get(a, 0) > 0 for a in skill_aids)
+            )
             ctx["total_members"] = num_members
         signals.append(
             {
@@ -1019,33 +1028,46 @@ def calculate_scores(
                 )
             )
 
-            # Build per_project data for this artifact
+            # Build per_project data keyed by artifact to avoid overwrites
             if project_names:
                 bnames = artifact_branch_names.get(aid, {})
                 bcounts = artifact_branch_counts.get(aid, {})
                 all_br = artifact_all_branches.get(aid, {})
+
+                def _set_artifact(p: str, entry: dict) -> None:
+                    proj = per_project.setdefault(p, {"artifacts": {}})
+                    proj.setdefault("artifacts", {})[aid] = entry
+                    # Aggregate: found if any artifact found
+                    proj["found"] = any(a.get("found", False) for a in proj["artifacts"].values())
+
                 for p in artifact_default_projects.get(aid, []):
-                    per_project.setdefault(p, {})["found"] = True
-                    per_project[p]["branch"] = "default"
-                    per_project[p]["weight"] = DEFAULT_BRANCH_WEIGHT
+                    entry: dict = {
+                        "found": True,
+                        "branch": "default",
+                        "weight": DEFAULT_BRANCH_WEIGHT,
+                    }
                     if p in bnames:
-                        per_project[p]["branch_name"] = bnames[p]
+                        entry["branch_name"] = bnames[p]
                     if p in bcounts:
-                        per_project[p]["branch_count"] = bcounts[p]
+                        entry["branch_count"] = bcounts[p]
                     if p in all_br:
-                        per_project[p]["branches"] = all_br[p]
+                        entry["branches"] = all_br[p]
+                    _set_artifact(p, entry)
                 for p in artifact_feature_projects.get(aid, []):
-                    per_project.setdefault(p, {})["found"] = True
-                    per_project[p]["branch"] = "feature"
-                    per_project[p]["weight"] = FEATURE_BRANCH_WEIGHT
+                    entry = {
+                        "found": True,
+                        "branch": "feature",
+                        "weight": FEATURE_BRANCH_WEIGHT,
+                    }
                     if p in bnames:
-                        per_project[p]["branch_name"] = bnames[p]
+                        entry["branch_name"] = bnames[p]
                     if p in bcounts:
-                        per_project[p]["branch_count"] = bcounts[p]
+                        entry["branch_count"] = bcounts[p]
                     if p in all_br:
-                        per_project[p]["branches"] = all_br[p]
+                        entry["branches"] = all_br[p]
+                    _set_artifact(p, entry)
                 for p in artifact_missing_projects.get(aid, []):
-                    per_project.setdefault(p, {})["found"] = False
+                    _set_artifact(p, {"found": False})
 
         breakdown = " ".join(breakdown_parts) if breakdown_parts else evidence
 

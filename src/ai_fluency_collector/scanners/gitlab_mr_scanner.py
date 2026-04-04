@@ -171,24 +171,24 @@ class MRScanner:
         pr_size_median: float | None = statistics.median(pr_sizes) if pr_sizes else None
         coding_time_median: float | None = statistics.median(coding_times) if coding_times else None
 
-        # Short repo names for evidence (no URLs)
-        short_repos = sorted(all_repos)
-        repo_suffix = ""
-        if short_repos:
-            short_names = [short_name(r) for r in short_repos]
-            repo_suffix = f" across {', '.join(short_names)}"
+        # Build evidence with repo lists aligned to each metric's actual data
+        def _repo_suffix(repos: dict) -> str:
+            if not repos:
+                return ""
+            names = [short_name(r) for r in sorted(repos.keys())]
+            return f" across {', '.join(names)}"
 
-        # Build evidence
         evidence: dict[str, str] = {}
         if pr_size_median is not None:
             evidence["pr_size_median"] = (
                 f"PR size (AI-attributed): {round(pr_size_median)} median lines changed "
-                f"(N={len(pr_sizes)} MRs{repo_suffix})"
+                f"(N={len(pr_sizes)} MRs{_repo_suffix(repo_pr_sizes)})"
             )
         if coding_time_median is not None:
             evidence["coding_time_median"] = (
                 f"Coding time (AI-attributed): {round(coding_time_median, 1)}h median "
-                f"first commit to MR open (N={len(coding_times)} MRs{repo_suffix})"
+                f"first commit to MR open "
+                f"(N={len(coding_times)} MRs{_repo_suffix(repo_coding_times)})"
             )
 
         # Build per_repo metadata

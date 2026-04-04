@@ -85,7 +85,10 @@ class GitHubReviewScanner:
 
         # Per-repo tracking
         repo_total: dict[str, int] = {}
+        repo_lgtm: dict[str, int] = {}
         repo_ai: dict[str, int] = {}
+        repo_ai_agent: dict[str, int] = {}
+        repo_self_review: dict[str, int] = {}
         all_repos: set[str] = set()
 
         # Reviewer aggregates (comment depth)
@@ -112,6 +115,7 @@ class GitHubReviewScanner:
                 comments = self.client.get_pr_review_comments(owner, repo, number)
                 if not comments:
                     lgtm_count += 1
+                    repo_lgtm[repo_str] = repo_lgtm.get(repo_str, 0) + 1
 
                 # Reviews → first approval timestamp
                 reviews = self.client.get_pr_reviews(owner, repo, number)
@@ -129,6 +133,7 @@ class GitHubReviewScanner:
                     ]
                     if author_comments_before:
                         self_reviewed_count += 1
+                        repo_self_review[repo_str] = repo_self_review.get(repo_str, 0) + 1
 
                 # Commits → AI co-author detection
                 commits = self.client.get_pr_commits(owner, repo, number)
@@ -157,6 +162,7 @@ class GitHubReviewScanner:
                         tool_pr_counts[tool] = tool_pr_counts.get(tool, 0) + 1
                 if has_agent:
                     ai_agent_count += 1
+                    repo_ai_agent[repo_str] = repo_ai_agent.get(repo_str, 0) + 1
 
             # ── Reviewed PRs (comment depth) ──────────────────────────────────
             reviewed_query = (
@@ -232,7 +238,10 @@ class GitHubReviewScanner:
         for repo_str in all_repos:
             per_repo[repo_str] = {
                 "total": repo_total.get(repo_str, 0),
+                "lgtm": repo_lgtm.get(repo_str, 0),
                 "ai": repo_ai.get(repo_str, 0),
+                "ai_agent": repo_ai_agent.get(repo_str, 0),
+                "self_review": repo_self_review.get(repo_str, 0),
             }
 
         return GitHubReviewMetrics(

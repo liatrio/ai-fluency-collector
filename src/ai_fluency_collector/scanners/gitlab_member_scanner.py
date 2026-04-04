@@ -6,6 +6,26 @@ from dataclasses import dataclass, field
 
 from ai_fluency_collector.gitlab_client import GitLabClient
 
+
+def _repo_path(repo: dict) -> str:
+    """Extract a unique repo path from a GitLab project dict.
+
+    Prefers path_with_namespace (always unique), falls back to parsing
+    web_url, then uses the project ID as last resort.
+    """
+    path = repo.get("path_with_namespace")
+    if path:
+        return path
+    web_url = repo.get("web_url", "")
+    if web_url:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(web_url).path.lstrip("/")
+        if parsed:
+            return parsed
+    return str(repo.get("id", "unknown"))
+
+
 # AI co-author patterns to detect in commit messages (case-insensitive)
 AI_COAUTHOR_PATTERNS: list[dict] = [
     {
@@ -101,7 +121,7 @@ class MemberScanner:
         user_id = user["id"]
 
         repos = self._discover_member_repos(user_id)
-        repo_names = [r.get("path_with_namespace", r.get("name", str(r["id"]))) for r in repos]
+        repo_names = [_repo_path(r) for r in repos]
         result = MemberResult(
             username=username,
             repos_discovered=len(repos),
@@ -111,7 +131,7 @@ class MemberScanner:
         for repo in repos:
             counts = self._scan_commits_for_coauthors(repo["id"], username)
             if counts:
-                repo_name = repo.get("path_with_namespace", repo.get("name", str(repo["id"])))
+                repo_name = _repo_path(repo)
                 result.repo_coauthor_counts[repo_name] = counts
             for pattern_id, count in counts.items():
                 result.ai_coauthor_counts[pattern_id] = (

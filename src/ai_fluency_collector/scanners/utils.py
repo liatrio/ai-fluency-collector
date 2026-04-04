@@ -27,13 +27,15 @@ def project_name_from_mr(mr: dict) -> str:
     full_ref = refs.get("full", "")
     if full_ref and "!" in full_ref:
         return full_ref.rsplit("!", 1)[0]
-    # Fallback: extract from web_url path (never expose the URL itself)
+    # Fallback: extract full path from web_url (never expose the URL itself)
     web_url = mr.get("web_url", "")
     if web_url:
-        # https://gitlab.com/group/project/-/merge_requests/123
-        parts = web_url.split("/-/")[0].split("/")
-        if len(parts) >= 2:
-            return "/".join(parts[-2:])
+        # https://gitlab.com/group/subgroup/project/-/merge_requests/123
+        from urllib.parse import urlparse
+
+        path = urlparse(web_url).path.lstrip("/")
+        if "/-/" in path:
+            return path.split("/-/", 1)[0]
     return str(mr.get("project_id", "unknown"))
 
 

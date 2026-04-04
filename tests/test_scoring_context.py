@@ -351,7 +351,10 @@ def test_artifact_per_project_in_scoring_context():
     assert "per_project" in ctx
     assert "group/platform-api" in ctx["per_project"]
     assert ctx["per_project"]["group/platform-api"]["found"] is True
-    assert ctx["per_project"]["group/platform-api"]["branch"] == "feature"
+    # Per-artifact data nested under "artifacts"
+    artifacts = ctx["per_project"]["group/platform-api"]["artifacts"]
+    assert "claude-md" in artifacts
+    assert artifacts["claude-md"]["branch"] == "feature"
     assert "group/data-pipeline" in ctx["per_project"]
     assert ctx["per_project"]["group/data-pipeline"]["found"] is False
 
