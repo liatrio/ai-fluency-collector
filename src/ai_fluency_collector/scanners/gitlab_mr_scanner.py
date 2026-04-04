@@ -5,9 +5,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from ai_fluency_collector.gitlab_client import GitLabClient
-from ai_fluency_collector.scanners.gitlab_review_scanner import (
-    MR_AI_COAUTHOR_PATTERNS,
-    _period_to_date_range,
+from ai_fluency_collector.scanners.gitlab_review_scanner import MR_AI_COAUTHOR_PATTERNS
+from ai_fluency_collector.scanners.utils import (
+    period_to_date_range,
+    project_name_from_mr,
+    short_name,
 )
 
 
@@ -72,6 +74,8 @@ class MRMetrics:
     coding_time_median: float | None
     coding_time_mr_count: int
     evidence: dict[str, str] = field(default_factory=dict)
+    per_repo: dict[str, dict] = field(default_factory=dict)
+    """Per-repo MR size/coding time data for scoring_context."""
 
 
 class MRScanner:
@@ -87,8 +91,11 @@ class MRScanner:
     API calls needed.
     """
 
-    def __init__(self, client: GitLabClient) -> None:
+    def __init__(self, client: GitLabClient, project_paths: list[str] | None = None) -> None:
         self.client = client
+        self._project_filter: set[str] | None = (
+            {p.lower() for p in project_paths} if project_paths else None
+        )
 
     def scan(self, usernames: list[str], period: str) -> MRMetrics:
         """Scan MR size and coding time signals for a team over a survey period.
@@ -100,10 +107,15 @@ class MRScanner:
         Returns:
             MRMetrics with aggregated team-level metrics.
         """
-        start_date, end_date = _period_to_date_range(period)
+        start_date, end_date = period_to_date_range(period)
 
         pr_sizes: list[int] = []
         coding_times: list[float] = []
+        # Per-repo tracking
+        repo_mr_counts: dict[str, int] = {}
+        repo_pr_sizes: dict[str, list[int]] = {}
+        repo_coding_times: dict[str, list[float]] = {}
+        all_repos: set[str] = set()
 
         for username in usernames:
             authored_mrs = self.client.search_merge_requests(
@@ -114,6 +126,11 @@ class MRScanner:
             )
 
             for mr in authored_mrs:
+                # Filter to configured projects if set
+                if self._project_filter:
+                    mp = project_name_from_mr(mr)
+                    if mp.lower() not in self._project_filter:
+                        continue
                 project_id = mr["project_id"]
                 mr_iid = mr["iid"]
 
@@ -134,34 +151,57 @@ class MRScanner:
                 if not is_ai_attributed:
                     continue
 
+                repo_name = project_name_from_mr(mr)
+                all_repos.add(repo_name)
+                repo_mr_counts[repo_name] = repo_mr_counts.get(repo_name, 0) + 1
+
                 # Collect PR size
                 size = _parse_changes_count(mr.get("changes_count"))
                 if size is not None:
                     pr_sizes.append(size)
+                    repo_pr_sizes.setdefault(repo_name, []).append(size)
 
                 # Collect coding time (reuses commits already fetched above)
                 ct = _coding_time_hours(mr, commits)
                 if ct is not None:
                     coding_times.append(ct)
+                    repo_coding_times.setdefault(repo_name, []).append(ct)
 
         # Compute medians
         pr_size_median: float | None = statistics.median(pr_sizes) if pr_sizes else None
-        coding_time_median: float | None = (
-            statistics.median(coding_times) if coding_times else None
-        )
+        coding_time_median: float | None = statistics.median(coding_times) if coding_times else None
 
-        # Build evidence
+        # Build evidence with repo lists aligned to each metric's actual data
+        def _repo_suffix(repos: dict) -> str:
+            if not repos:
+                return ""
+            names = [short_name(r) for r in sorted(repos.keys())]
+            return f" across {', '.join(names)}"
+
         evidence: dict[str, str] = {}
         if pr_size_median is not None:
             evidence["pr_size_median"] = (
                 f"PR size (AI-attributed): {round(pr_size_median)} median lines changed "
-                f"(N={len(pr_sizes)} MRs)"
+                f"(N={len(pr_sizes)} MRs{_repo_suffix(repo_pr_sizes)})"
             )
         if coding_time_median is not None:
             evidence["coding_time_median"] = (
                 f"Coding time (AI-attributed): {round(coding_time_median, 1)}h median "
-                f"first commit to MR open (N={len(coding_times)} MRs)"
+                f"first commit to MR open "
+                f"(N={len(coding_times)} MRs{_repo_suffix(repo_coding_times)})"
             )
+
+        # Build per_repo metadata
+        per_repo: dict[str, dict] = {}
+        for repo_name in all_repos:
+            sizes = repo_pr_sizes.get(repo_name, [])
+            times = repo_coding_times.get(repo_name, [])
+            entry: dict = {"count": repo_mr_counts.get(repo_name, 0)}
+            if sizes:
+                entry["median_lines"] = round(statistics.median(sizes))
+            if times:
+                entry["median_hours"] = round(statistics.median(times), 1)
+            per_repo[repo_name] = entry
 
         return MRMetrics(
             pr_size_median=pr_size_median,
@@ -169,4 +209,5 @@ class MRScanner:
             coding_time_median=coding_time_median,
             coding_time_mr_count=len(coding_times),
             evidence=evidence,
+            per_repo=per_repo,
         )

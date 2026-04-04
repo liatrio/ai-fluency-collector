@@ -59,7 +59,7 @@ def test_no_ci_file_returns_all_zero():
     result = scanner.scan_project(PROJECT)
     assert len(result) == len(CI_PATTERN_IDS)
     for pid in CI_PATTERN_IDS:
-        assert result[pid] == 0.0
+        assert result[pid]["weight"] == 0.0
 
 
 @responses.activate
@@ -76,7 +76,7 @@ def test_sast_via_template_include():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["sast-dast"] == DEFAULT_BRANCH_WEIGHT
+    assert result["sast-dast"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -93,7 +93,7 @@ def test_sast_via_job_name():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["sast-dast"] == DEFAULT_BRANCH_WEIGHT
+    assert result["sast-dast"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -110,7 +110,7 @@ def test_dast_via_include_string():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["sast-dast"] == DEFAULT_BRANCH_WEIGHT
+    assert result["sast-dast"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -126,7 +126,7 @@ def test_secret_detection_via_template():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["secret-detection"] == DEFAULT_BRANCH_WEIGHT
+    assert result["secret-detection"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -142,7 +142,7 @@ def test_secret_detection_via_job_name():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["secret-detection"] == DEFAULT_BRANCH_WEIGHT
+    assert result["secret-detection"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -158,7 +158,7 @@ def test_ai_code_review():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["ai-code-review"] == DEFAULT_BRANCH_WEIGHT
+    assert result["ai-code-review"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -174,7 +174,7 @@ def test_ai_test_generation():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["ai-test-generation"] == DEFAULT_BRANCH_WEIGHT
+    assert result["ai-test-generation"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -190,7 +190,7 @@ def test_dependency_scanning_via_template():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["dependency-scanning"] == DEFAULT_BRANCH_WEIGHT
+    assert result["dependency-scanning"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -206,7 +206,7 @@ def test_code_coverage_via_coverage_key():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["code-coverage"] == DEFAULT_BRANCH_WEIGHT
+    assert result["code-coverage"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -232,7 +232,7 @@ def test_code_coverage_via_report():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["code-coverage"] == DEFAULT_BRANCH_WEIGHT
+    assert result["code-coverage"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -254,7 +254,7 @@ def test_deployment_gates():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["deployment-gates"] == DEFAULT_BRANCH_WEIGHT
+    assert result["deployment-gates"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -283,10 +283,10 @@ def test_multiple_patterns_in_one_file():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["sast-dast"] == DEFAULT_BRANCH_WEIGHT
-    assert result["secret-detection"] == DEFAULT_BRANCH_WEIGHT
-    assert result["code-coverage"] == DEFAULT_BRANCH_WEIGHT
-    assert result["deployment-gates"] == DEFAULT_BRANCH_WEIGHT
+    assert result["sast-dast"]["weight"] == DEFAULT_BRANCH_WEIGHT
+    assert result["secret-detection"]["weight"] == DEFAULT_BRANCH_WEIGHT
+    assert result["code-coverage"]["weight"] == DEFAULT_BRANCH_WEIGHT
+    assert result["deployment-gates"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -305,8 +305,8 @@ def test_include_list_of_strings():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["sast-dast"] == DEFAULT_BRANCH_WEIGHT
-    assert result["dependency-scanning"] == DEFAULT_BRANCH_WEIGHT
+    assert result["sast-dast"]["weight"] == DEFAULT_BRANCH_WEIGHT
+    assert result["dependency-scanning"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -318,7 +318,7 @@ def test_invalid_yaml_returns_all_zero():
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
     for pid in CI_PATTERN_IDS:
-        assert result[pid] == 0.0
+        assert result[pid]["weight"] == 0.0
 
 
 @responses.activate
@@ -347,7 +347,8 @@ def test_ci_pattern_on_feature_branch_higher_weight():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["sast-dast"] == FEATURE_BRANCH_WEIGHT
+    assert result["sast-dast"]["weight"] == FEATURE_BRANCH_WEIGHT
+    assert result["sast-dast"]["branch"] == "feat/add-sast"
 
 
 @responses.activate
@@ -386,7 +387,7 @@ def test_local_include_scanned():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["deployment-gates"] == DEFAULT_BRANCH_WEIGHT
+    assert result["deployment-gates"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -412,7 +413,7 @@ def test_local_include_missing_file_skipped():
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
     for pid in CI_PATTERN_IDS:
-        assert result[pid] == 0.0
+        assert result[pid]["weight"] == 0.0
 
 
 @responses.activate
@@ -449,7 +450,7 @@ def test_cross_project_include_ai_review():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["ai-code-review"] == DEFAULT_BRANCH_WEIGHT
+    assert result["ai-code-review"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -473,4 +474,4 @@ def test_cross_project_include_file_as_string():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["ai-code-review"] == DEFAULT_BRANCH_WEIGHT
+    assert result["ai-code-review"]["weight"] == DEFAULT_BRANCH_WEIGHT

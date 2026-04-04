@@ -50,7 +50,7 @@ class GitHubClient:
             if resp.status_code != 429:
                 return resp
             retry_after = resp.headers.get("Retry-After")
-            wait = int(retry_after) if retry_after and retry_after.isdigit() else 2 ** attempt
+            wait = int(retry_after) if retry_after and retry_after.isdigit() else 2**attempt
             time.sleep(wait)
         return resp  # return last response even if still 429
 

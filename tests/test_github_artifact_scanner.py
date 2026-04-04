@@ -88,7 +88,7 @@ def test_claude_md_large_scores_100():
     scanner = GitHubArtifactScanner(client)
     scores = scanner.scan_repo("org", "repo")
 
-    assert scores["cq-context"] == 100
+    assert scores["cq-context"]["score"] == 100
 
 
 @responses.activate
@@ -110,7 +110,7 @@ def test_cursorrules_short_scores_40():
     scanner = GitHubArtifactScanner(client)
     scores = scanner.scan_repo("org", "repo")
 
-    assert scores["cq-context"] == 40
+    assert scores["cq-context"]["score"] == 40
 
 
 @responses.activate
@@ -137,7 +137,7 @@ def test_no_context_files_scores_0():
     scanner = GitHubArtifactScanner(client)
     scores = scanner.scan_repo("org", "repo")
 
-    assert scores["cq-context"] == 0
+    assert scores["cq-context"]["score"] == 0
 
 
 # ── tg-permission-gated ──────────────────────────────────────────────────────
@@ -169,7 +169,7 @@ def test_settings_with_permissions_scores_80():
     scanner = GitHubArtifactScanner(client)
     scores = scanner.scan_repo("org", "repo")
 
-    assert scores["tg-permission-gated"] == 80
+    assert scores["tg-permission-gated"]["score"] == 80
 
 
 # ── ks-patterns (prompt directories) ─────────────────────────────────────────
@@ -202,7 +202,7 @@ def test_prompts_dir_with_5_files_scores_75():
     scanner = GitHubArtifactScanner(client)
     scores = scanner.scan_repo("org", "repo")
 
-    assert scores["ks-patterns"] == 75
+    assert scores["ks-patterns"]["score"] == 75
 
 
 # ── pm-advanced (MCP config) ─────────────────────────────────────────────────
@@ -235,7 +235,7 @@ def test_mcp_json_with_multiple_servers_scores_100():
     scanner = GitHubArtifactScanner(client)
     scores = scanner.scan_repo("org", "repo")
 
-    assert scores["pm-advanced"] == 100
+    assert scores["pm-advanced"]["score"] == 100
 
 
 # ── Multi-repo max aggregation ───────────────────────────────────────────────

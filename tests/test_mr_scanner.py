@@ -171,10 +171,12 @@ def test_scan_no_mrs_in_period():
 @responses.activate
 def test_scan_ignores_mr_with_invalid_changes_count():
     """MR with 'too many changes' in changes_count is excluded from median."""
-    _register_authored_mrs([
-        _mr(1, changes_count="too many changes"),
-        _mr(2, changes_count=100),
-    ])
+    _register_authored_mrs(
+        [
+            _mr(1, changes_count="too many changes"),
+            _mr(2, changes_count=100),
+        ]
+    )
     _register_commits(PROJECT_ID, 1, [_ai_commit()])
     _register_commits(PROJECT_ID, 2, [_ai_commit()])
 
@@ -202,11 +204,13 @@ def test_scan_ignores_mr_with_none_changes_count():
 @responses.activate
 def test_scan_median_of_multiple_mrs():
     """Median is computed correctly across multiple AI-attributed MRs."""
-    _register_authored_mrs([
-        _mr(1, changes_count=100),
-        _mr(2, changes_count=300),
-        _mr(3, changes_count=500),
-    ])
+    _register_authored_mrs(
+        [
+            _mr(1, changes_count=100),
+            _mr(2, changes_count=300),
+            _mr(3, changes_count=500),
+        ]
+    )
     _register_commits(PROJECT_ID, 1, [_ai_commit()])
     _register_commits(PROJECT_ID, 2, [_ai_commit()])
     _register_commits(PROJECT_ID, 3, [_ai_commit()])
@@ -221,10 +225,12 @@ def test_scan_median_of_multiple_mrs():
 @responses.activate
 def test_scan_mixed_ai_and_non_ai_mrs():
     """Only AI-attributed MRs contribute to the median."""
-    _register_authored_mrs([
-        _mr(1, changes_count=100),   # AI-attributed
-        _mr(2, changes_count=9000),  # NOT AI-attributed
-    ])
+    _register_authored_mrs(
+        [
+            _mr(1, changes_count=100),  # AI-attributed
+            _mr(2, changes_count=9000),  # NOT AI-attributed
+        ]
+    )
     _register_commits(PROJECT_ID, 1, [_ai_commit()])
     _register_commits(PROJECT_ID, 2, [_plain_commit()])
 
@@ -353,9 +359,13 @@ def test_scan_coding_time_computed_for_ai_mr():
     """AI-attributed MR: coding time computed from first commit to MR open."""
     mr = _mr_with_timestamps(1, created_at="2026-03-17T13:00:00.000Z")
     _register_authored_mrs([mr])
-    _register_commits(PROJECT_ID, 1, [
-        _ai_commit(created_at="2026-03-17T09:00:00.000Z"),  # 4h before MR
-    ])
+    _register_commits(
+        PROJECT_ID,
+        1,
+        [
+            _ai_commit(created_at="2026-03-17T09:00:00.000Z"),  # 4h before MR
+        ],
+    )
 
     client = GitLabClient("test-token")
     metrics = MRScanner(client).scan(["alice"], PERIOD)
@@ -370,8 +380,9 @@ def test_scan_coding_time_none_for_zero_commit_mr():
     mr = _mr_with_timestamps(1, created_at="2026-03-17T13:00:00.000Z", changes_count=100)
     _register_authored_mrs([mr])
     # Register empty commit list (first page empty → done)
-    responses.add(responses.GET, f"{BASE}/projects/{PROJECT_ID}/merge_requests/1/commits",
-                  json=[], status=200)
+    responses.add(
+        responses.GET, f"{BASE}/projects/{PROJECT_ID}/merge_requests/1/commits", json=[], status=200
+    )
 
     client = GitLabClient("test-token")
     metrics = MRScanner(client).scan(["alice"], PERIOD)
@@ -386,9 +397,13 @@ def test_scan_coding_time_evidence_format():
     """Evidence string follows the specified format."""
     mr = _mr_with_timestamps(1, created_at="2026-03-17T13:00:00.000Z")
     _register_authored_mrs([mr])
-    _register_commits(PROJECT_ID, 1, [
-        _ai_commit(created_at="2026-03-17T09:00:00.000Z"),
-    ])
+    _register_commits(
+        PROJECT_ID,
+        1,
+        [
+            _ai_commit(created_at="2026-03-17T09:00:00.000Z"),
+        ],
+    )
 
     client = GitLabClient("test-token")
     metrics = MRScanner(client).scan(["alice"], PERIOD)
@@ -408,6 +423,7 @@ def _mr_metrics(
     count: int = 3,
 ):
     from ai_fluency_collector.scanners.gitlab_mr_scanner import MRMetrics
+
     evidence = {}
     if pr_size_median is not None:
         evidence["pr_size_median"] = (

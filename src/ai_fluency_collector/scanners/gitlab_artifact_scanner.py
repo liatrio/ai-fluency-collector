@@ -116,12 +116,14 @@ class ArtifactScanner:
                     return True
         return False
 
-    def scan_project(self, project_path: str) -> dict[str, float]:
+    def scan_project(self, project_path: str) -> dict[str, dict]:
         """Scan a project across all active branches for artifact types.
 
-        Returns a dict of {artifact_id: weight} where weight is the highest
-        branch weight where the artifact was found (0.0 if not found).
-        Default branch = 0.5, active feature branch = 0.8.
+        Returns a dict of {artifact_id: info} where info contains:
+            weight: float - highest branch weight (0.0 if not found)
+            branch: str|None - name of the best-weight branch
+            branch_count: int - total number of branches where artifact was found
+            branches: list[str] - all branch names where artifact was found
 
         Raises GitLabAccessError if the project is inaccessible.
         """
@@ -133,14 +135,21 @@ class ArtifactScanner:
         if not active_branches:
             active_branches = [{"name": "HEAD", "weight": DEFAULT_BRANCH_WEIGHT}]
 
-        results: dict[str, float] = {}
+        results: dict[str, dict] = {}
         for artifact in ARTIFACT_DEFINITIONS:
             best_weight = 0.0
+            best_branch: str | None = None
+            found_branches: list[str] = []
             for branch in active_branches:
                 if self._check_artifact_on_branch(project_path, artifact, branch["name"]):
-                    best_weight = max(best_weight, branch["weight"])
-                    # If we already found the max possible weight, stop early
-                    if best_weight >= FEATURE_BRANCH_WEIGHT:
-                        break
-            results[artifact["id"]] = best_weight
+                    found_branches.append(branch["name"])
+                    if branch["weight"] > best_weight:
+                        best_weight = branch["weight"]
+                        best_branch = branch["name"]
+            results[artifact["id"]] = {
+                "weight": best_weight,
+                "branch": best_branch,
+                "branch_count": len(found_branches),
+                "branches": found_branches,
+            }
         return results

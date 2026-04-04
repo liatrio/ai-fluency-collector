@@ -6,6 +6,26 @@ from dataclasses import dataclass, field
 
 from ai_fluency_collector.gitlab_client import GitLabClient
 
+
+def _repo_path(repo: dict) -> str:
+    """Extract a unique repo path from a GitLab project dict.
+
+    Prefers path_with_namespace (always unique), falls back to parsing
+    web_url, then uses the project ID as last resort.
+    """
+    path = repo.get("path_with_namespace")
+    if path:
+        return path
+    web_url = repo.get("web_url", "")
+    if web_url:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(web_url).path.lstrip("/")
+        if parsed:
+            return parsed
+    return str(repo.get("id", "unknown"))
+
+
 # AI co-author patterns to detect in commit messages (case-insensitive)
 AI_COAUTHOR_PATTERNS: list[dict] = [
     {
@@ -30,7 +50,11 @@ AI_COAUTHOR_PATTERNS: list[dict] = [
 class MemberResult:
     username: str
     repos_discovered: int = 0
+    repos_discovered_names: list[str] = field(default_factory=list)
+    """Names of all repos discovered for this member (not just AI-active ones)."""
     ai_coauthor_counts: dict[str, int] = field(default_factory=dict)
+    repo_coauthor_counts: dict[str, dict[str, int]] = field(default_factory=dict)
+    """Per-repo AI coauthor commit counts: {repo_name: {pattern_id: count}}"""
 
 
 class MemberScanner:
@@ -97,10 +121,18 @@ class MemberScanner:
         user_id = user["id"]
 
         repos = self._discover_member_repos(user_id)
-        result = MemberResult(username=username, repos_discovered=len(repos))
+        repo_names = [_repo_path(r) for r in repos]
+        result = MemberResult(
+            username=username,
+            repos_discovered=len(repos),
+            repos_discovered_names=repo_names,
+        )
 
         for repo in repos:
             counts = self._scan_commits_for_coauthors(repo["id"], username)
+            if counts:
+                repo_name = _repo_path(repo)
+                result.repo_coauthor_counts[repo_name] = counts
             for pattern_id, count in counts.items():
                 result.ai_coauthor_counts[pattern_id] = (
                     result.ai_coauthor_counts.get(pattern_id, 0) + count

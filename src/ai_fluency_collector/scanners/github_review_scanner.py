@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date
 
 from ai_fluency_collector.github_client import GitHubClient
+from ai_fluency_collector.scanners.utils import period_to_date_range
 
 # AI co-author patterns — same as GitLab member scanner
 _CLAUDE_PATTERN = re.compile(r"co-authored-by:.*claude", re.IGNORECASE)
@@ -15,15 +15,6 @@ _CLAUDE_AGENT_PATTERN = re.compile(
     r"co-authored-by:.*claude.*code|generated with.*claude.*code",
     re.IGNORECASE,
 )
-
-
-def _period_to_date_range(period: str) -> tuple[str, str]:
-    """Convert YYYY-WNN to (start, end) ISO 8601 date strings (Mon–Sun)."""
-    year = int(period[:4])
-    week = int(period[6:])
-    start = date.fromisocalendar(year, week, 1)
-    end = date.fromisocalendar(year, week, 7)
-    return start.isoformat(), end.isoformat()
 
 
 def _repo_and_number_from_pr(item: dict) -> tuple[str, str, int] | None:
@@ -51,6 +42,10 @@ class GitHubReviewMetrics:
     self_review_rate: float | None
     total_authored_prs: int
     evidence: dict[str, str] = field(default_factory=dict)
+    per_repo: dict[str, dict] = field(default_factory=dict)
+    """Per-repo PR review metrics for scoring_context."""
+    tool_breakdown: dict[str, int] = field(default_factory=dict)
+    """Per-tool PR counts: {tool_name: pr_count}"""
 
 
 class GitHubReviewScanner:
@@ -77,7 +72,7 @@ class GitHubReviewScanner:
         Returns:
             GitHubReviewMetrics with aggregated team-level metrics.
         """
-        start_date, end_date = _period_to_date_range(period)
+        start_date, end_date = period_to_date_range(period)
         usernames_set = set(usernames)
 
         # Authored PR aggregates
@@ -86,6 +81,15 @@ class GitHubReviewScanner:
         self_reviewed_count = 0
         ai_coauthor_count = 0
         ai_agent_count = 0
+        tool_pr_counts: dict[str, int] = {}  # tool_name → PR count
+
+        # Per-repo tracking
+        repo_total: dict[str, int] = {}
+        repo_lgtm: dict[str, int] = {}
+        repo_ai: dict[str, int] = {}
+        repo_ai_agent: dict[str, int] = {}
+        repo_self_review: dict[str, int] = {}
+        all_repos: set[str] = set()
 
         # Reviewer aggregates (comment depth)
         total_files_changed = 0
@@ -102,12 +106,16 @@ class GitHubReviewScanner:
                     continue
                 owner, repo, number = parsed
                 total_authored += 1
+                repo_str = f"{owner}/{repo}"
+                all_repos.add(repo_str)
+                repo_total[repo_str] = repo_total.get(repo_str, 0) + 1
                 author_login = pr.get("user", {}).get("login", username)
 
                 # Inline review comments → LGTM detection
                 comments = self.client.get_pr_review_comments(owner, repo, number)
                 if not comments:
                     lgtm_count += 1
+                    repo_lgtm[repo_str] = repo_lgtm.get(repo_str, 0) + 1
 
                 # Reviews → first approval timestamp
                 reviews = self.client.get_pr_reviews(owner, repo, number)
@@ -125,26 +133,36 @@ class GitHubReviewScanner:
                     ]
                     if author_comments_before:
                         self_reviewed_count += 1
+                        repo_self_review[repo_str] = repo_self_review.get(repo_str, 0) + 1
 
                 # Commits → AI co-author detection
                 commits = self.client.get_pr_commits(owner, repo, number)
                 has_ai = False
                 has_agent = False
+                pr_tools: set[str] = set()
                 for commit in commits:
                     message = commit.get("commit", {}).get("message", "")
                     if _CLAUDE_AGENT_PATTERN.search(message):
                         has_agent = True
                         has_ai = True
-                    elif (
-                        _CLAUDE_PATTERN.search(message)
-                        or _COPILOT_PATTERN.search(message)
-                        or _CURSOR_PATTERN.search(message)
-                    ):
+                        pr_tools.add("Claude Code")
+                    elif _CLAUDE_PATTERN.search(message):
                         has_ai = True
+                        pr_tools.add("Claude")
+                    if _COPILOT_PATTERN.search(message):
+                        has_ai = True
+                        pr_tools.add("GitHub Copilot")
+                    if _CURSOR_PATTERN.search(message):
+                        has_ai = True
+                        pr_tools.add("Cursor")
                 if has_ai:
                     ai_coauthor_count += 1
+                    repo_ai[repo_str] = repo_ai.get(repo_str, 0) + 1
+                    for tool in pr_tools:
+                        tool_pr_counts[tool] = tool_pr_counts.get(tool, 0) + 1
                 if has_agent:
                     ai_agent_count += 1
+                    repo_ai_agent[repo_str] = repo_ai_agent.get(repo_str, 0) + 1
 
             # ── Reviewed PRs (comment depth) ──────────────────────────────────
             reviewed_query = (
@@ -181,29 +199,50 @@ class GitHubReviewScanner:
         review_depth = files_with_comment / total_files_changed if total_files_changed > 0 else None
 
         # ── Team-level evidence (no individual attribution) ───────────────────
+        sorted_repos = sorted(all_repos)
+        repo_suffix = ""
+        if sorted_repos:
+            repo_suffix = f" (across {', '.join(sorted_repos)})"
+
         evidence: dict[str, str] = {}
         if lgtm_rate is not None:
             evidence["lgtm_without_comment"] = (
-                f"{lgtm_count}/{total_authored} team-authored PRs approved without review comments"
+                f"{lgtm_count}/{total_authored} team-authored PRs "
+                f"approved without review comments{repo_suffix}"
             )
         if review_depth is not None:
             pct = round(review_depth * 100)
             evidence["review_comment_depth"] = (
-                f"Team reviewers commented on {pct}% of changed files on average"
+                f"Team reviewers commented on {pct}% of changed files on average{repo_suffix}"
             )
         if ai_coauthor_rate is not None:
             pct = round(ai_coauthor_rate * 100)
-            evidence["ai_coauthor_rate"] = f"{pct}% of team-authored PRs contain AI co-author tags"
+            evidence["ai_coauthor_rate"] = (
+                f"{pct}% of team-authored PRs contain AI co-author tags{repo_suffix}"
+            )
         if ai_agent_rate is not None:
             pct = round(ai_agent_rate * 100)
             evidence["ai_agent_coauthor_rate"] = (
-                f"{pct}% of team-authored PRs contain Claude Code agentic co-author tags"
+                f"{pct}% of team-authored PRs contain Claude Code "
+                f"agentic co-author tags{repo_suffix}"
             )
         if self_review_rate is not None:
             pct = round(self_review_rate * 100)
             evidence["self_review_rate"] = (
-                f"{pct}% of team-authored PRs included author self-review before approval"
+                f"{pct}% of team-authored PRs included author self-review "
+                f"before approval{repo_suffix}"
             )
+
+        # ── Build per_repo metadata ──────────────────────────────────────────
+        per_repo: dict[str, dict] = {}
+        for repo_str in all_repos:
+            per_repo[repo_str] = {
+                "total": repo_total.get(repo_str, 0),
+                "lgtm": repo_lgtm.get(repo_str, 0),
+                "ai": repo_ai.get(repo_str, 0),
+                "ai_agent": repo_ai_agent.get(repo_str, 0),
+                "self_review": repo_self_review.get(repo_str, 0),
+            }
 
         return GitHubReviewMetrics(
             lgtm_rate=lgtm_rate,
@@ -213,4 +252,6 @@ class GitHubReviewScanner:
             self_review_rate=self_review_rate,
             total_authored_prs=total_authored,
             evidence=evidence,
+            per_repo=per_repo,
+            tool_breakdown=tool_pr_counts,
         )

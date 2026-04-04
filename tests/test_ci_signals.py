@@ -142,7 +142,7 @@ def test_ci_signals_detect_job_by_name():
         ci_signals={"ai-code-review": ["ai-review"]},
     )
     result = scanner.scan_project(PROJECT)
-    assert result["ai-code-review"] == DEFAULT_BRANCH_WEIGHT
+    assert result["ai-code-review"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -167,7 +167,7 @@ def test_ci_signals_detect_template_path():
         ci_signals={"ai-code-review": ["ai-review/.ai-code-review.yml"]},
     )
     result = scanner.scan_project(PROJECT)
-    assert result["ai-code-review"] == DEFAULT_BRANCH_WEIGHT
+    assert result["ai-code-review"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -188,7 +188,7 @@ def test_ci_signals_no_match():
         ci_signals={"ai-code-review": ["ai-review"]},
     )
     result = scanner.scan_project(PROJECT)
-    assert result["ai-code-review"] == 0.0
+    assert result["ai-code-review"]["weight"] == 0.0
 
 
 @responses.activate
@@ -213,9 +213,9 @@ def test_ci_signals_combined_with_auto_detection():
     )
     result = scanner.scan_project(PROJECT)
     # SAST detected by auto-detection
-    assert result["sast-dast"] == DEFAULT_BRANCH_WEIGHT
+    assert result["sast-dast"]["weight"] == DEFAULT_BRANCH_WEIGHT
     # AI code review detected by user signal (substring match on job name)
-    assert result["ai-code-review"] == DEFAULT_BRANCH_WEIGHT
+    assert result["ai-code-review"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -236,7 +236,7 @@ def test_ci_signals_deployment_gates_by_job_name():
         ci_signals={"deployment-gates": ["deploy_staging"]},
     )
     result = scanner.scan_project(PROJECT)
-    assert result["deployment-gates"] == DEFAULT_BRANCH_WEIGHT
+    assert result["deployment-gates"]["weight"] == DEFAULT_BRANCH_WEIGHT
 
 
 @responses.activate
@@ -253,5 +253,5 @@ def test_ci_signals_without_ci_signals_param():
     client = GitLabClient("test-token")
     scanner = CIScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["sast-dast"] == DEFAULT_BRANCH_WEIGHT
-    assert result["ai-code-review"] == 0.0
+    assert result["sast-dast"]["weight"] == DEFAULT_BRANCH_WEIGHT
+    assert result["ai-code-review"]["weight"] == 0.0

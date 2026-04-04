@@ -164,6 +164,8 @@ def calculate_mr_signals(metrics, size_mappings: dict, coding_time_mappings: dic
         "coding_time_median": metrics.coding_time_median,
     }
 
+    per_repo = getattr(metrics, "per_repo", None)
+
     signals: list[dict] = []
     for metric_key, skill_maps in all_mappings.items():
         value = metric_values.get(metric_key)
@@ -174,12 +176,15 @@ def calculate_mr_signals(metrics, size_mappings: dict, coding_time_mappings: dic
             if score <= 0:
                 continue
             evidence = metrics.evidence.get(metric_key, "detected")
+            ctx = _rate_context(evidence)
+            if per_repo:
+                ctx["per_repo"] = per_repo
             signals.append(
                 {
                     "skill_id": m["skill_id"],
                     "score": score,
                     "evidence": evidence,
-                    "scoring_context": _rate_context(evidence),
+                    "scoring_context": ctx,
                 }
             )
 
@@ -200,6 +205,8 @@ def calculate_mr_size_scores(metrics, mappings: dict) -> list[dict]:
     if metrics is None or metrics.pr_size_median is None:
         return []
 
+    per_repo = getattr(metrics, "per_repo", None)
+
     signals: list[dict] = []
     for metric_key, skill_maps in mappings.items():
         value = getattr(metrics, metric_key, None)
@@ -210,12 +217,15 @@ def calculate_mr_size_scores(metrics, mappings: dict) -> list[dict]:
             if score <= 0:
                 continue
             evidence = metrics.evidence.get(metric_key, "detected")
+            ctx = _rate_context(evidence)
+            if per_repo:
+                ctx["per_repo"] = per_repo
             signals.append(
                 {
                     "skill_id": m["skill_id"],
                     "score": score,
                     "evidence": evidence,
-                    "scoring_context": _rate_context(evidence),
+                    "scoring_context": ctx,
                 }
             )
 
@@ -233,7 +243,18 @@ MEMBER_SKILL_MAPPINGS: list[dict] = [
 ]
 
 
-def _artifact_breakdown(name: str, feat: int, dflt: int, missing: int, num_projects: int) -> str:
+def _artifact_breakdown(
+    name: str,
+    feat: int,
+    dflt: int,
+    missing: int,
+    num_projects: int,
+    default_projects: list[str] | None = None,
+    feature_projects: list[str] | None = None,
+    missing_projects: list[str] | None = None,
+    branch_names: dict[str, str] | None = None,
+    branch_counts: dict[str, int] | None = None,
+) -> str:
     """Build a human-readable breakdown sentence for an artifact signal.
 
     Args:
@@ -242,22 +263,62 @@ def _artifact_breakdown(name: str, feat: int, dflt: int, missing: int, num_proje
         dflt: Number of projects where it was found on the default branch.
         missing: Number of projects where it was not found at all.
         num_projects: Total number of team projects.
+        default_projects: Project names where artifact was found on default branch.
+        feature_projects: Project names where artifact was found on feature branch only.
+        missing_projects: Project names where artifact was not found.
+        branch_names: Optional {project_path: branch_name} for actual branch names.
     """
     total_found = feat + dflt
+
+    # Build project name lists for evidence
+    def _proj_list(projects: list[str] | None) -> str:
+        if not projects:
+            return ""
+        return ", ".join(_short_name(p) for p in projects)
+
+    def _proj_with_branch(p: str, branch_type: str) -> str:
+        """Format project name with branch info, using actual name if available."""
+        short = _short_name(p)
+        count = branch_counts.get(p, 0) if branch_counts else 0
+        if branch_names and p in branch_names:
+            bname = branch_names[p]
+            if count > 1:
+                return f"{short} ({count} branches, e.g. {bname})"
+            return f"{short} ({bname})"
+        return f"{short} ({branch_type})"
 
     if total_found == num_projects:
         # Found everywhere
         if dflt == num_projects:
-            return f"{name} found in all {num_projects} projects on the default branch."
-        if feat == num_projects:
+            proj_detail = ""
+            if default_projects:
+                proj_detail = f": {_proj_list(default_projects)}"
             return (
-                f"{name} found in all {num_projects} projects, but only on feature branches. "
+                f"{name} found in all {num_projects} projects on the default branch{proj_detail}."
+            )
+        if feat == num_projects:
+            proj_detail = ""
+            if feature_projects:
+                parts = [_proj_with_branch(p, "feature") for p in feature_projects]
+                proj_detail = f": {', '.join(parts)}"
+            return (
+                f"{name} found in all {num_projects} projects{proj_detail}, "
+                f"but only on feature branches. "
                 f"Move to the default branch for a higher score."
             )
         # Mixed: some default, some feature-only
+        dflt_detail = ""
+        feat_detail = ""
+        if default_projects:
+            parts = [_proj_with_branch(p, "default") for p in default_projects]
+            dflt_detail = f" ({', '.join(parts)})"
+        if feature_projects:
+            parts = [_proj_with_branch(p, "feature") for p in feature_projects]
+            feat_detail = f" ({', '.join(parts)})"
         return (
             f"{name} found in all {num_projects} projects — "
-            f"{dflt} on the default branch, {feat} on feature branches only. "
+            f"{dflt} on the default branch{dflt_detail}, "
+            f"{feat} on feature branches only{feat_detail}. "
             f"Move the remaining {feat} to the default branch for a higher score."
         )
     else:
@@ -275,10 +336,35 @@ def _artifact_breakdown(name: str, feat: int, dflt: int, missing: int, num_proje
         elif feat > 0:
             location = " (feature branch only)"
 
+        # Add project names to found/missing detail
+        found_detail = ""
+        missing_detail = ""
+        if default_projects or feature_projects:
+            found_names = []
+            if default_projects:
+                found_names.extend(_proj_with_branch(p, "default branch") for p in default_projects)
+            if feature_projects:
+                found_names.extend(
+                    _proj_with_branch(p, "feature branch only") for p in feature_projects
+                )
+            found_detail = f": {', '.join(found_names)}"
+        if missing_projects:
+            missing_detail = f" Missing from: {_proj_list(missing_projects)}."
+
+        # Skip aggregate location when found_detail already has per-project branch info
+        effective_location = "" if found_detail else location
+
         return (
-            f"{name} found in {total_found} of {num_projects} projects{location}. "
-            f"{'To improve: ' + hint + '.' if hint else ''}"
+            f"{name} found in {total_found} of {num_projects} projects"
+            f"{found_detail}{effective_location}."
+            f"{missing_detail}"
+            f"{' To improve: ' + hint + '.' if hint else ''}"
         ).strip()
+
+
+def _short_name(project_path: str) -> str:
+    """Extract the short project name from a full path (e.g. 'group/subgroup/repo' → 'repo')."""
+    return project_path.rsplit("/", 1)[-1] if "/" in project_path else project_path
 
 
 def _rate_context(breakdown: str) -> dict:
@@ -290,6 +376,7 @@ def calculate_coverage_scores(
     current_results: list,
     prior_results: list | None,
     mappings: list[dict],
+    project_names: list[str] | None = None,
 ) -> list[dict]:
     """Calculate skill scores from per-project coverage data across two periods.
 
@@ -306,15 +393,16 @@ def calculate_coverage_scores(
         current_results: List of CoverageResult for the current period.
         prior_results: List of CoverageResult for the prior period, or None.
         mappings: COVERAGE_SKILL_MAPPINGS list.
+        project_names: Optional list of project paths, aligned with current_results.
 
     Returns:
         List of {skill_id, score, evidence} dicts. Empty if no coverage data.
     """
-    current_with_data = [r for r in current_results if r.coverage is not None]
+    current_with_data = [(i, r) for i, r in enumerate(current_results) if r.coverage is not None]
     if not current_with_data:
         return []
 
-    mean_current = sum(r.coverage for r in current_with_data) / len(current_with_data)
+    mean_current = sum(r.coverage for _, r in current_with_data) / len(current_with_data)
     num_projects = len(current_with_data)
 
     # Compute delta if prior data available
@@ -325,35 +413,61 @@ def calculate_coverage_scores(
             mean_prior = sum(r.coverage for r in prior_with_data) / len(prior_with_data)
             delta = mean_current - mean_prior
 
+    # Include project names in evidence
+    proj_detail = ""
+    if project_names:
+        active_names = [
+            _short_name(project_names[i]) for i, _ in current_with_data if i < len(project_names)
+        ]
+        if active_names:
+            proj_detail = f": {', '.join(active_names)}"
+
     # Score formula
     if delta is not None:
         score = max(0, min(100, round(50 + delta * 10)))
         delta_str = f"{'+' if delta >= 0 else ''}{delta:.1f}%"
         evidence = (
             f"Test coverage: {mean_current:.0f}% "
-            f"({delta_str} from prior period, N={num_projects} projects)"
+            f"({delta_str} from prior period, N={num_projects} projects{proj_detail})"
         )
     else:
         score = max(0, min(100, round(mean_current)))
-        evidence = f"Test coverage: {mean_current:.0f}% (N={num_projects} projects)"
+        evidence = f"Test coverage: {mean_current:.0f}% (N={num_projects} projects{proj_detail})"
 
     if score <= 0:
         return []
 
-    return [
-        {
-            "skill_id": m["skill_id"],
-            "score": score,
-            "evidence": evidence,
-            "scoring_context": _rate_context(evidence),
-        }
-        for m in mappings
-    ]
+    # Build per_project scoring_context
+    per_project: dict[str, dict] = {}
+    if project_names:
+        for i, r in current_with_data:
+            if i < len(project_names):
+                entry: dict = {"coverage_pct": round(r.coverage, 1)}
+                job_names = getattr(r, "job_names", [])
+                if job_names:
+                    entry["jobs"] = job_names
+                per_project[project_names[i]] = entry
+
+    signals = []
+    for m in mappings:
+        ctx = _rate_context(evidence)
+        if per_project:
+            ctx["per_project"] = per_project
+        signals.append(
+            {
+                "skill_id": m["skill_id"],
+                "score": score,
+                "evidence": evidence,
+                "scoring_context": ctx,
+            }
+        )
+    return signals
 
 
 def calculate_pipeline_scores(
     project_results: list,
     mappings: dict[str, list[dict]],
+    project_names: list[str] | None = None,
 ) -> list[dict]:
     """Calculate skill scores from per-project pipeline pass rate data.
 
@@ -363,20 +477,43 @@ def calculate_pipeline_scores(
     Args:
         project_results: List of PipelinePassResult objects (from CIScanner).
         mappings: CI_PIPELINE_SKILL_MAPPINGS dict.
+        project_names: Optional list of project paths, aligned with project_results.
 
     Returns:
         List of {skill_id, score, evidence} dicts. Empty if no pipelines found.
     """
-    projects_with_data = [r for r in project_results if r.total_count > 0]
+    projects_with_data = [(i, r) for i, r in enumerate(project_results) if r.total_count > 0]
     if not projects_with_data:
         return []
 
-    mean_rate = sum(r.pass_count / r.total_count for r in projects_with_data) / len(
+    mean_rate = sum(r.pass_count / r.total_count for _, r in projects_with_data) / len(
         projects_with_data
     )
-    total_pipelines = sum(r.total_count for r in projects_with_data)
+    total_pipelines = sum(r.total_count for _, r in projects_with_data)
     pct = round(mean_rate * 100)
-    evidence = f"{pct}% of pipelines passed on first attempt (N={total_pipelines} pipelines)"
+
+    proj_detail = ""
+    if project_names:
+        active_names = [
+            _short_name(project_names[i]) for i, _ in projects_with_data if i < len(project_names)
+        ]
+        if active_names:
+            proj_detail = f" across {', '.join(active_names)}"
+
+    evidence = (
+        f"{pct}% of pipelines passed on first attempt (N={total_pipelines} pipelines{proj_detail})"
+    )
+
+    per_project: dict[str, dict] = {}
+    if project_names:
+        for i, r in enumerate(project_results):
+            if i < len(project_names) and r.total_count > 0:
+                rate = round(r.pass_count / r.total_count * 100)
+                per_project[project_names[i]] = {
+                    "total": r.total_count,
+                    "passed": r.pass_count,
+                    "pass_rate_pct": rate,
+                }
 
     signals: list[dict] = []
     for skill_maps in mappings.values():
@@ -384,12 +521,15 @@ def calculate_pipeline_scores(
             score = m["score_fn"](mean_rate)
             if score <= 0:
                 continue
+            ctx = _rate_context(evidence)
+            if per_project:
+                ctx["per_project"] = per_project
             signals.append(
                 {
                     "skill_id": m["skill_id"],
                     "score": score,
                     "evidence": evidence,
-                    "scoring_context": _rate_context(evidence),
+                    "scoring_context": ctx,
                 }
             )
 
@@ -399,6 +539,7 @@ def calculate_pipeline_scores(
 def calculate_ci_execution_scores(
     execution_results: list,
     mappings: dict[str, list[dict]],
+    project_names: list[str] | None = None,
 ) -> list[dict]:
     """Calculate skill scores from CI execution verification data.
 
@@ -409,6 +550,7 @@ def calculate_ci_execution_scores(
     Args:
         execution_results: List of CIExecutionResult objects (from CIScanner).
         mappings: CI_EXECUTION_SKILL_MAPPINGS dict.
+        project_names: Optional list of project paths, aligned with execution_results.
 
     Returns:
         List of {skill_id, score, evidence} dicts. Empty if no execution data.
@@ -416,15 +558,23 @@ def calculate_ci_execution_scores(
     if not execution_results:
         return []
 
-    # Aggregate per-pattern stats across projects
+    # Aggregate per-pattern stats across projects and track which projects ran each pattern
     aggregated: dict[str, list[int]] = {}  # pid -> [passed, ran, checked]
-    for result in execution_results:
+    pattern_projects: dict[str, list[str]] = {}  # pid -> project names with executions
+    pattern_failed_jobs: dict[str, list[str]] = {}  # pid -> failed job names
+    for idx, result in enumerate(execution_results):
+        proj_name = project_names[idx] if project_names and idx < len(project_names) else None
         for pid, (passed, ran, checked) in result.pattern_stats.items():
             if pid not in aggregated:
                 aggregated[pid] = [0, 0, 0]
             aggregated[pid][0] += passed
             aggregated[pid][1] += ran
             aggregated[pid][2] += checked
+            if proj_name and ran > 0:
+                pattern_projects.setdefault(pid, []).append(proj_name)
+        # Collect failed job names
+        for pid, jobs in getattr(result, "failed_jobs", {}).items():
+            pattern_failed_jobs.setdefault(pid, []).extend(jobs)
 
     if not aggregated:
         return []
@@ -444,24 +594,35 @@ def calculate_ci_execution_scores(
         execution_rate = ran / checked
         pass_rate = passed / ran if ran > 0 else 0.0
 
+        proj_detail = ""
+        if pattern_projects.get(pid):
+            proj_detail = f" in {', '.join(_short_name(p) for p in pattern_projects[pid])}"
+
         if ran == 0:
             evidence = f"{pid}: configured but not executed in {checked} pipelines checked"
         else:
             evidence = (
                 f"{pid}: ran in {ran}/{checked} pipelines, "
                 f"{passed}/{ran} passed ({round(pass_rate * 100)}% pass rate)"
+                f"{proj_detail}"
             )
+
+        # Deduplicate failed job names for this pattern
+        failed = sorted(set(pattern_failed_jobs.get(pid, [])))
 
         for m in skill_maps:
             score = m["score_fn"](execution_rate * pass_rate)
             if score <= 0:
                 continue
             skill_id = m["skill_id"]
+            ctx = _rate_context(evidence)
+            if failed:
+                ctx["failed_jobs"] = failed
             entry = {
                 "skill_id": skill_id,
                 "score": score,
                 "evidence": evidence,
-                "scoring_context": _rate_context(evidence),
+                "scoring_context": ctx,
             }
             if skill_id not in best_per_skill or score > best_per_skill[skill_id]["score"]:
                 best_per_skill[skill_id] = entry
@@ -487,6 +648,9 @@ def calculate_mr_coauthor_scores(metrics, mappings: dict) -> list[dict]:
         "mr_agentic_coauthor_rate": metrics.mr_agentic_coauthor_rate,
     }
 
+    per_project = getattr(metrics, "per_project", None)
+    tool_breakdown = getattr(metrics, "tool_breakdown", None)
+
     signals: list[dict] = []
     for metric_key, skill_maps in mappings.items():
         value = metric_values.get(metric_key)
@@ -497,12 +661,17 @@ def calculate_mr_coauthor_scores(metrics, mappings: dict) -> list[dict]:
             if score <= 0:
                 continue
             evidence = metrics.evidence.get(metric_key, "detected")
+            ctx = _rate_context(evidence)
+            if per_project:
+                ctx["per_project"] = per_project
+            if tool_breakdown:
+                ctx["tool_breakdown"] = tool_breakdown
             signals.append(
                 {
                     "skill_id": m["skill_id"],
                     "score": score,
                     "evidence": evidence,
-                    "scoring_context": _rate_context(evidence),
+                    "scoring_context": ctx,
                 }
             )
 
@@ -528,6 +697,8 @@ def calculate_review_scores(metrics, mappings: dict) -> list[dict]:
         "self_review_rate": metrics.self_review_rate,
     }
 
+    per_project = getattr(metrics, "per_project", None)
+
     signals: list[dict] = []
     for metric_key, skill_maps in mappings.items():
         value = metric_values.get(metric_key)
@@ -538,12 +709,15 @@ def calculate_review_scores(metrics, mappings: dict) -> list[dict]:
             if score <= 0:
                 continue
             evidence = metrics.evidence.get(metric_key, "detected")
+            ctx = _rate_context(evidence)
+            if per_project:
+                ctx["per_project"] = per_project
             signals.append(
                 {
                     "skill_id": m["skill_id"],
                     "score": score,
                     "evidence": evidence,
-                    "scoring_context": _rate_context(evidence),
+                    "scoring_context": ctx,
                 }
             )
 
@@ -575,11 +749,16 @@ def calculate_member_scores(
     # Count how many members have each pattern
     pattern_member_counts: dict[str, int] = defaultdict(int)
     pattern_total_commits: dict[str, int] = defaultdict(int)
+    # Per-pattern repo commit counts: {pattern_id: {repo_name: commit_count}}
+    pattern_repo_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for result in member_results:
         for pattern_id, count in result.ai_coauthor_counts.items():
             if count > 0:
                 pattern_member_counts[pattern_id] += 1
                 pattern_total_commits[pattern_id] += count
+        for repo_name, counts in getattr(result, "repo_coauthor_counts", {}).items():
+            for pattern_id, count in counts.items():
+                pattern_repo_counts[pattern_id][repo_name] += count
 
     # Group mappings by skill_id
     skill_mappings: dict[str, list[dict]] = defaultdict(list)
@@ -592,6 +771,8 @@ def calculate_member_scores(
         found_weight = 0.0
         total_weight = 0.0
         evidence_parts = []
+        # Aggregate repos for this skill's patterns only
+        skill_repo_counts: dict[str, int] = defaultdict(int)
 
         for m in skill_maps:
             aid = m["artifact_id"]
@@ -611,10 +792,21 @@ def calculate_member_scores(
                     if p["id"] == aid:
                         name = p["name"]
                         break
+
+                # Build per-pattern repo detail
+                pattern_repos = pattern_repo_counts.get(aid, {})
+                for repo, cnt in pattern_repos.items():
+                    skill_repo_counts[repo] += cnt
+                repo_detail = ""
+                if pattern_repos:
+                    sorted_repos = sorted(pattern_repos.keys(), key=lambda r: -pattern_repos[r])
+                    short_names = [_short_name(r) for r in sorted_repos]
+                    repo_detail = f" across {', '.join(short_names)}"
+
                 evidence_parts.append(
                     f"Co-authored commits with {name} "
                     f"by {member_count}/{num_members} members "
-                    f"({commits} commits)"
+                    f"({commits} commits{repo_detail})"
                 )
 
         if total_weight > 0:
@@ -645,6 +837,17 @@ def calculate_member_scores(
         ctx: dict = {"breakdown": breakdown, "max_from_this_signal": max_signal}
         if missing_signals:
             ctx["missing_signals"] = missing_signals
+        skill_repos_sorted = sorted(skill_repo_counts.keys(), key=lambda r: -skill_repo_counts[r])
+        if skill_repos_sorted:
+            ctx["repos_with_activity"] = skill_repos_sorted
+            ctx["total_commits"] = sum(skill_repo_counts.values())
+            skill_aids = {m["artifact_id"] for m in skill_maps}
+            ctx["members_with_activity"] = sum(
+                1
+                for r in member_results
+                if any(r.ai_coauthor_counts.get(a, 0) > 0 for a in skill_aids)
+            )
+            ctx["total_members"] = num_members
         signals.append(
             {
                 "skill_id": skill_id,
@@ -671,6 +874,7 @@ def calculate_scores(
     scan_results: list[dict[str, bool | float]],
     mappings: list[dict],
     artifact_names: dict[str, str] | None = None,
+    project_names: list[str] | None = None,
 ) -> list[dict]:
     """Calculate weighted skill scores from scan results across multiple projects.
 
@@ -681,6 +885,7 @@ def calculate_scores(
             scale the mapping weight by the branch weight.
         mappings: List of mapping dicts with artifact_id, skill_id, weight.
         artifact_names: Optional dict of {artifact_id: display_name} for evidence.
+        project_names: Optional list of project paths, aligned with scan_results.
 
     Returns:
         List of {skill_id, score, evidence} dicts. Only skills with score > 0 are included.
@@ -710,22 +915,64 @@ def calculate_scores(
         artifact_counts: dict[str, int] = defaultdict(int)
         feature_counts: dict[str, int] = defaultdict(int)
         default_counts: dict[str, int] = defaultdict(int)
+        # Track which projects have each artifact on which branch type
+        artifact_default_projects: dict[str, list[str]] = defaultdict(list)
+        artifact_feature_projects: dict[str, list[str]] = defaultdict(list)
+        artifact_missing_projects: dict[str, list[str]] = defaultdict(list)
+        # Track actual branch names and counts per project per artifact
+        artifact_branch_names: dict[str, dict[str, str]] = defaultdict(dict)
+        artifact_branch_counts: dict[str, dict[str, int]] = defaultdict(dict)
+        artifact_all_branches: dict[str, dict[str, list[str]]] = defaultdict(dict)
 
-        for project_result in scan_results:
+        for idx, project_result in enumerate(scan_results):
+            proj_name = project_names[idx] if project_names and idx < len(project_names) else None
             found_weight = 0.0
             for m in skill_maps:
-                value = project_result.get(m["artifact_id"], False)
+                aid = m["artifact_id"]
+                raw = project_result.get(aid, False)
+                # Support both old format (float/bool) and new format (dict)
+                if isinstance(raw, dict):
+                    value = raw.get("weight", 0.0)
+                    branch_name = raw.get("branch")
+                    branch_count = raw.get("branch_count", 1 if branch_name else 0)
+                    all_branches = raw.get("branches", [])
+                else:
+                    value = raw
+                    branch_name = None
+                    branch_count = 0
+                    all_branches = []
                 if isinstance(value, (int, float)) and value > 0:
                     found_weight += m["weight"] * value
-                    artifact_counts[m["artifact_id"]] += 1
+                    artifact_counts[aid] += 1
                     if value >= FEATURE_BRANCH_WEIGHT:
-                        feature_counts[m["artifact_id"]] += 1
+                        feature_counts[aid] += 1
+                        if proj_name:
+                            artifact_feature_projects[aid].append(proj_name)
+                            if branch_name:
+                                artifact_branch_names[aid][proj_name] = branch_name
+                            if branch_count:
+                                artifact_branch_counts[aid][proj_name] = branch_count
+                            if all_branches:
+                                artifact_all_branches[aid][proj_name] = all_branches
                     elif value >= DEFAULT_BRANCH_WEIGHT:
-                        default_counts[m["artifact_id"]] += 1
+                        default_counts[aid] += 1
+                        if proj_name:
+                            artifact_default_projects[aid].append(proj_name)
+                            if branch_name:
+                                artifact_branch_names[aid][proj_name] = branch_name
+                            if branch_count:
+                                artifact_branch_counts[aid][proj_name] = branch_count
+                            if all_branches:
+                                artifact_all_branches[aid][proj_name] = all_branches
                 elif value is True:
                     found_weight += m["weight"]
-                    artifact_counts[m["artifact_id"]] += 1
-                    feature_counts[m["artifact_id"]] += 1  # bool True = best branch
+                    artifact_counts[aid] += 1
+                    feature_counts[aid] += 1  # bool True = best branch
+                    if proj_name:
+                        artifact_feature_projects[aid].append(proj_name)
+                else:
+                    if proj_name:
+                        artifact_missing_projects[aid].append(proj_name)
             if total_weight > 0:
                 project_scores.append(min(100.0, (found_weight / total_weight) * 100.0))
             else:
@@ -737,18 +984,26 @@ def calculate_scores(
         if score <= 0:
             continue
 
-        # Evidence: artifact presence counts
+        # Evidence: artifact presence counts with project names
         evidence_parts = []
         for m in skill_maps:
             aid = m["artifact_id"]
             if artifact_counts[aid] > 0:
                 name = artifact_names.get(aid, aid) if artifact_names else _get_artifact_name(aid)
                 count = artifact_counts[aid]
-                evidence_parts.append(f"{name} found in {count}/{num_projects} projects")
+                found_projects = artifact_default_projects[aid] + artifact_feature_projects[aid]
+                if found_projects:
+                    proj_names_str = ", ".join(_short_name(p) for p in found_projects)
+                    evidence_parts.append(
+                        f"{name} found in {count}/{num_projects} projects: {proj_names_str}"
+                    )
+                else:
+                    evidence_parts.append(f"{name} found in {count}/{num_projects} projects")
         evidence = "; ".join(evidence_parts) if evidence_parts else "detected"
 
         # scoring_context: human-readable explanation of current state and how to improve
         breakdown_parts = []
+        per_project: dict[str, dict] = {}
         for m in skill_maps:
             aid = m["artifact_id"]
             feat = feature_counts[aid]
@@ -758,13 +1013,74 @@ def calculate_scores(
                 continue
             name = artifact_names.get(aid, aid) if artifact_names else _get_artifact_name(aid)
             missing = num_projects - total_found
-            breakdown_parts.append(_artifact_breakdown(name, feat, dflt, missing, num_projects))
+            breakdown_parts.append(
+                _artifact_breakdown(
+                    name,
+                    feat,
+                    dflt,
+                    missing,
+                    num_projects,
+                    default_projects=artifact_default_projects.get(aid),
+                    feature_projects=artifact_feature_projects.get(aid),
+                    missing_projects=artifact_missing_projects.get(aid),
+                    branch_names=artifact_branch_names.get(aid),
+                    branch_counts=artifact_branch_counts.get(aid),
+                )
+            )
+
+            # Build per_project data keyed by artifact to avoid overwrites
+            if project_names:
+                bnames = artifact_branch_names.get(aid, {})
+                bcounts = artifact_branch_counts.get(aid, {})
+                all_br = artifact_all_branches.get(aid, {})
+
+                def _set_artifact(p: str, entry: dict) -> None:
+                    proj = per_project.setdefault(p, {"artifacts": {}})
+                    proj.setdefault("artifacts", {})[aid] = entry
+                    # Aggregate: found if any artifact found
+                    proj["found"] = any(a.get("found", False) for a in proj["artifacts"].values())
+
+                for p in artifact_default_projects.get(aid, []):
+                    entry: dict = {
+                        "found": True,
+                        "branch": "default",
+                        "weight": DEFAULT_BRANCH_WEIGHT,
+                    }
+                    if p in bnames:
+                        entry["branch_name"] = bnames[p]
+                    if p in bcounts:
+                        entry["branch_count"] = bcounts[p]
+                    if p in all_br:
+                        entry["branches"] = all_br[p]
+                    _set_artifact(p, entry)
+                for p in artifact_feature_projects.get(aid, []):
+                    entry = {
+                        "found": True,
+                        "branch": "feature",
+                        "weight": FEATURE_BRANCH_WEIGHT,
+                    }
+                    if p in bnames:
+                        entry["branch_name"] = bnames[p]
+                    if p in bcounts:
+                        entry["branch_count"] = bcounts[p]
+                    if p in all_br:
+                        entry["branches"] = all_br[p]
+                    _set_artifact(p, entry)
+                for p in artifact_missing_projects.get(aid, []):
+                    _set_artifact(p, {"found": False})
+
         breakdown = " ".join(breakdown_parts) if breakdown_parts else evidence
 
         max_found_weight = 0.0
         for m in skill_maps:
             aid = m["artifact_id"]
-            best = max((float(r.get(aid, 0)) for r in scan_results), default=0.0)
+
+            def _extract_weight(raw):
+                if isinstance(raw, dict):
+                    return float(raw.get("weight", 0))
+                return float(raw) if raw else 0.0
+
+            best = max((_extract_weight(r.get(aid, 0)) for r in scan_results), default=0.0)
             if best > 0:
                 max_found_weight += m["weight"] * best
         max_signal = (
@@ -779,6 +1095,8 @@ def calculate_scores(
         ctx: dict = {"breakdown": breakdown, "max_from_this_signal": max_signal}
         if missing_signals:
             ctx["missing_signals"] = missing_signals
+        if per_project:
+            ctx["per_project"] = per_project
         signals.append(
             {
                 "skill_id": skill_id,

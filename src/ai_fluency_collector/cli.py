@@ -336,12 +336,18 @@ def scan(
 
     for project, result in zip(team.projects, artifact_scan_results):
         if verbose:
-            for aid, weight in result.items():
-                if weight > 0:
-                    click.echo(f"      found {aid} (weight={weight})")
+            for aid, info in result.items():
+                w = info["weight"] if isinstance(info, dict) else info
+                if w > 0:
+                    branch = info.get("branch", "") if isinstance(info, dict) else ""
+                    click.echo(f"      found {aid} (weight={w}, branch={branch})")
 
         all_artifact_results.append(result)
-        found = [aid for aid, present in result.items() if present]
+        found = [
+            aid
+            for aid, info in result.items()
+            if (info["weight"] > 0 if isinstance(info, dict) else info)
+        ]
         if found:
             names = []
             for aid in found:
@@ -354,7 +360,9 @@ def scan(
             click.echo(f"  {project}: no artifacts found")
 
     # 11. Calculate artifact scores
-    artifact_signals = calculate_scores(all_artifact_results, ARTIFACT_SKILL_MAPPINGS)
+    artifact_signals = calculate_scores(
+        all_artifact_results, ARTIFACT_SKILL_MAPPINGS, project_names=team.projects
+    )
     click.echo(f"  → {len(artifact_signals)} artifact signals detected")
     click.echo()
 
@@ -371,14 +379,22 @@ def scan(
 
     for project, result in zip(team.projects, ci_scan_results):
         all_ci_results.append(result)
-        found = [pid for pid in CI_PATTERN_IDS if result.get(pid, False)]
+        found = [
+            pid
+            for pid in CI_PATTERN_IDS
+            if (
+                result.get(pid, {}).get("weight", 0) > 0
+                if isinstance(result.get(pid), dict)
+                else result.get(pid, False)
+            )
+        ]
         if found:
             click.echo(f"  {project}: {', '.join(found)}")
         else:
             click.echo(f"  {project}: no CI patterns found")
 
     # 13. Calculate CI scores
-    ci_signals = calculate_scores(all_ci_results, CI_SKILL_MAPPINGS)
+    ci_signals = calculate_scores(all_ci_results, CI_SKILL_MAPPINGS, project_names=team.projects)
     click.echo(f"  → {len(ci_signals)} CI signals detected")
     click.echo()
 
@@ -408,8 +424,8 @@ def scan(
     click.echo()
 
     # 16–18. Per-week: pipeline pass rate + review signals → output file
-    review_scanner = ReviewScanner(client)
-    mr_scanner = MRScanner(client)
+    review_scanner = ReviewScanner(client, project_paths=team.projects)
+    mr_scanner = MRScanner(client, project_paths=team.projects)
     output_paths: list[str] = []
     total_signals_all = len(artifact_signals) + len(ci_signals) + len(member_signals)
 
@@ -431,7 +447,9 @@ def scan(
             raise click.ClickException(str(e)) from e
         for project in team.projects:
             click.echo(f"  Scanning pipelines for {project}...")
-        pipeline_signals = calculate_pipeline_scores(pipeline_results, CI_PIPELINE_SKILL_MAPPINGS)
+        pipeline_signals = calculate_pipeline_scores(
+            pipeline_results, CI_PIPELINE_SKILL_MAPPINGS, project_names=team.projects
+        )
         total_pipelines = sum(r.total_count for r in pipeline_results)
         click.echo(f"  {total_pipelines} pipelines analyzed across projects")
         click.echo(f"  → {len(pipeline_signals)} pipeline signals detected")
@@ -457,7 +475,10 @@ def scan(
             current_coverage.append(curr)
             prior_coverage.append(prior)
         coverage_signals = calculate_coverage_scores(
-            current_coverage, prior_coverage, COVERAGE_SKILL_MAPPINGS
+            current_coverage,
+            prior_coverage,
+            COVERAGE_SKILL_MAPPINGS,
+            project_names=team.projects,
         )
         click.echo(f"  → {len(coverage_signals)} coverage signals detected")
 
@@ -472,7 +493,7 @@ def scan(
             raise click.ClickException(str(e)) from e
 
         execution_signals = calculate_ci_execution_scores(
-            execution_results, CI_EXECUTION_SKILL_MAPPINGS
+            execution_results, CI_EXECUTION_SKILL_MAPPINGS, project_names=team.projects
         )
         configured_count = sum(len(r.pattern_stats) for r in execution_results)
         running_count = sum(

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 import yaml
 
 from ai_fluency_collector.gitlab_client import GitLabClient
+from ai_fluency_collector.scanners.utils import period_to_date_range
 
 # CI pattern definitions with IDs matching CI_SKILL_MAPPINGS in scoring.py
 CI_PATTERN_IDS = [
@@ -260,6 +261,8 @@ class CIExecutionResult:
 
     # {pattern_id: (ran_and_passed, ran_total, pipelines_checked)}
     pattern_stats: dict[str, tuple[int, int, int]]
+    # {pattern_id: [job_name, ...]} — jobs that ran but failed
+    failed_jobs: dict[str, list[str]] = field(default_factory=dict)
 
 
 # Map CI pattern IDs to the regex patterns used for job name matching
@@ -278,6 +281,8 @@ class CoverageResult:
 
     coverage: float | None  # None when no coverage jobs found
     project_count: int = 1  # always 1; aggregated by calculate_coverage_scores
+    job_names: list[str] = field(default_factory=list)
+    """Names of jobs that reported coverage data."""
 
 
 @dataclass
@@ -286,15 +291,6 @@ class PipelinePassResult:
 
     pass_count: int
     total_count: int
-
-
-def _period_to_date_range(period: str) -> tuple[str, str]:
-    """Convert YYYY-WNN to (start_date, end_date) as ISO 8601 date strings."""
-    year = int(period[:4])
-    week = int(period[6:])
-    start = date.fromisocalendar(year, week, 1)
-    end = date.fromisocalendar(year, week, 7)
-    return start.isoformat(), end.isoformat()
 
 
 class CIScanner:
@@ -372,16 +368,17 @@ class CIScanner:
 
         return results
 
-    def scan_project(self, project_path: str) -> dict[str, float]:
+    def scan_project(self, project_path: str) -> dict[str, dict]:
         """Scan a project's .gitlab-ci.yml across all active branches.
 
-        Returns dict of {pattern_id: weight} where weight is the highest
-        branch weight where the pattern was found (0.0 if not found).
-        Default branch = 0.5, active feature branch = 0.8.
+        Returns dict of {pattern_id: {"weight": float, "branch": str|None}}
+        where weight is the highest branch weight where the pattern was found
+        (0.0 if not found). Default branch = 0.5, active feature branch = 0.8.
+        branch is the name of the branch with the highest weight, or None if
+        the pattern was not found.
         """
         from ai_fluency_collector.scanners.gitlab_artifact_scanner import (
             DEFAULT_BRANCH_WEIGHT,
-            FEATURE_BRANCH_WEIGHT,
             _get_active_branches,
         )
 
@@ -392,17 +389,20 @@ class CIScanner:
         if not active_branches:
             active_branches = [{"name": "HEAD", "weight": DEFAULT_BRANCH_WEIGHT}]
 
-        results: dict[str, float] = {pid: 0.0 for pid in CI_PATTERN_IDS}
+        results: dict[str, dict] = {
+            pid: {"weight": 0.0, "branch": None, "branch_count": 0, "branches": []}
+            for pid in CI_PATTERN_IDS
+        }
 
         for branch in active_branches:
             branch_results = self._scan_branch(project_path, branch["name"])
             for pid, found in branch_results.items():
                 if found:
-                    results[pid] = max(results[pid], branch["weight"])
-
-            # If all patterns already at max weight, stop early
-            if all(v >= FEATURE_BRANCH_WEIGHT for v in results.values()):
-                break
+                    results[pid]["branches"].append(branch["name"])
+                    results[pid]["branch_count"] += 1
+                    if branch["weight"] > results[pid]["weight"]:
+                        results[pid]["weight"] = branch["weight"]
+                        results[pid]["branch"] = branch["name"]
 
         return results
 
@@ -420,7 +420,7 @@ class CIScanner:
             PipelinePassResult with pass_count and total_count.
             total_count is 0 when no pipelines exist for the period.
         """
-        start_date, end_date = _period_to_date_range(period)
+        start_date, end_date = period_to_date_range(period)
         pipelines = self.client.get_pipelines(
             project_path, updated_after=start_date, updated_before=end_date
         )
@@ -467,17 +467,23 @@ class CIScanner:
         Returns:
             CIExecutionResult with per-pattern execution stats.
         """
+
         # Only check patterns that are configured and have a regex to match
+        def _get_weight(val) -> float:
+            if isinstance(val, dict):
+                return val.get("weight", 0.0)
+            return float(val) if val else 0.0
+
         patterns_to_check = {
             pid: regex
             for pid, regex in _PATTERN_REGEXES.items()
-            if configured_patterns.get(pid, 0.0) > 0
+            if _get_weight(configured_patterns.get(pid, 0.0)) > 0
         }
 
         if not patterns_to_check:
             return CIExecutionResult(pattern_stats={})
 
-        start_date, end_date = _period_to_date_range(period)
+        start_date, end_date = period_to_date_range(period)
         pipelines = self.client.get_pipelines(
             project_path, updated_after=start_date, updated_before=end_date
         )
@@ -490,6 +496,7 @@ class CIScanner:
 
         # Track per-pattern: (passed_count, ran_count, pipelines_checked)
         stats: dict[str, list[int]] = {pid: [0, 0, 0] for pid in patterns_to_check}
+        failed_jobs: dict[str, list[str]] = {}
 
         for pipeline in pipelines_to_check:
             pipeline_id = pipeline.get("id")
@@ -504,10 +511,12 @@ class CIScanner:
                         stats[pid][1] += 1  # ran
                         if job.get("status") == "success":
                             stats[pid][0] += 1  # passed
+                        else:
+                            failed_jobs.setdefault(pid, []).append(job_name)
                         break  # one match per pipeline per pattern is enough
 
         pattern_stats = {pid: (counts[0], counts[1], counts[2]) for pid, counts in stats.items()}
-        return CIExecutionResult(pattern_stats=pattern_stats)
+        return CIExecutionResult(pattern_stats=pattern_stats, failed_jobs=failed_jobs)
 
     def scan_coverage(self, project_path: str, period: str) -> CoverageResult:
         """Fetch mean test coverage for a project over a survey period.
@@ -522,13 +531,15 @@ class CIScanner:
         Returns:
             CoverageResult with mean coverage float, or None if no coverage jobs found.
         """
-        start_date, _ = _period_to_date_range(period)
+        start_date, _ = period_to_date_range(period)
         jobs = self.client.get_jobs(project_path, scope="success", updated_after=start_date)
 
-        coverage_values = [j["coverage"] for j in jobs if j.get("coverage") is not None]
+        coverage_jobs = [j for j in jobs if j.get("coverage") is not None]
+        coverage_values = [j["coverage"] for j in coverage_jobs]
 
         if not coverage_values:
             return CoverageResult(coverage=None)
 
+        job_names = sorted(set(j.get("name", "") for j in coverage_jobs if j.get("name")))
         mean_coverage = sum(coverage_values) / len(coverage_values)
-        return CoverageResult(coverage=mean_coverage)
+        return CoverageResult(coverage=mean_coverage, job_names=job_names)

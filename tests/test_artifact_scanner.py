@@ -83,8 +83,11 @@ def test_all_artifacts_detected_default_branch():
     result = scanner.scan_project(PROJECT)
 
     assert len(result) == 8
-    for artifact_id, weight in result.items():
-        assert weight == DEFAULT_BRANCH_WEIGHT, f"{artifact_id}: expected {DEFAULT_BRANCH_WEIGHT}"
+    for artifact_id, info in result.items():
+        assert info["weight"] == DEFAULT_BRANCH_WEIGHT, (
+            f"{artifact_id}: expected {DEFAULT_BRANCH_WEIGHT}"
+        )
+        assert info["branch"] == "main", f"{artifact_id}: expected branch 'main'"
 
 
 @responses.activate
@@ -98,8 +101,9 @@ def test_no_artifacts_found():
     result = scanner.scan_project(PROJECT)
 
     assert len(result) == 8
-    for artifact_id, weight in result.items():
-        assert weight == 0.0, f"Expected {artifact_id} to be 0.0"
+    for artifact_id, info in result.items():
+        assert info["weight"] == 0.0, f"Expected {artifact_id} to be 0.0"
+        assert info["branch"] is None, f"Expected {artifact_id} branch to be None"
 
 
 @responses.activate
@@ -142,7 +146,8 @@ def test_feature_branch_artifact_higher_weight():
     scanner = ArtifactScanner(client)
     result = scanner.scan_project(PROJECT)
 
-    assert result["claude-md"] == FEATURE_BRANCH_WEIGHT
+    assert result["claude-md"]["weight"] == FEATURE_BRANCH_WEIGHT
+    assert result["claude-md"]["branch"] == "feat/add-claude"
 
 
 @responses.activate
@@ -183,7 +188,8 @@ def test_artifact_on_both_branches_takes_highest():
     result = scanner.scan_project(PROJECT)
 
     # Feature branch weight (0.8) > default (0.5), so should be 0.8
-    assert result["claude-md"] == FEATURE_BRANCH_WEIGHT
+    assert result["claude-md"]["weight"] == FEATURE_BRANCH_WEIGHT
+    assert result["claude-md"]["branch"] == "feat/stuff"
 
 
 @responses.activate
@@ -220,7 +226,8 @@ def test_stale_branch_excluded():
     scanner = ArtifactScanner(client)
     result = scanner.scan_project(PROJECT)
 
-    assert result["claude-md"] == 0.0
+    assert result["claude-md"]["weight"] == 0.0
+    assert result["claude-md"]["branch"] is None
 
 
 @responses.activate
@@ -243,7 +250,8 @@ def test_or_logic_mcp_json_fallback():
     client = GitLabClient("test-token")
     scanner = ArtifactScanner(client)
     result = scanner.scan_project(PROJECT)
-    assert result["mcp-json"] == DEFAULT_BRANCH_WEIGHT
+    assert result["mcp-json"]["weight"] == DEFAULT_BRANCH_WEIGHT
+    assert result["mcp-json"]["branch"] == "main"
 
 
 @responses.activate
@@ -277,8 +285,9 @@ def test_no_active_branches_falls_back_to_head():
     scanner = ArtifactScanner(client)
     result = scanner.scan_project(PROJECT)
 
-    for weight in result.values():
-        assert weight == 0.0
+    for info in result.values():
+        assert info["weight"] == 0.0
+        assert info["branch"] is None
 
 
 @responses.activate
