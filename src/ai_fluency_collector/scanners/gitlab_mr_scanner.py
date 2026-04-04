@@ -90,8 +90,11 @@ class MRScanner:
     API calls needed.
     """
 
-    def __init__(self, client: GitLabClient) -> None:
+    def __init__(self, client: GitLabClient, project_paths: list[str] | None = None) -> None:
         self.client = client
+        self._project_filter: set[str] | None = (
+            {p.lower() for p in project_paths} if project_paths else None
+        )
 
     def scan(self, usernames: list[str], period: str) -> MRMetrics:
         """Scan MR size and coding time signals for a team over a survey period.
@@ -122,6 +125,11 @@ class MRScanner:
             )
 
             for mr in authored_mrs:
+                # Filter to configured projects if set
+                if self._project_filter:
+                    mp = _project_name_from_mr(mr)
+                    if mp.lower() not in self._project_filter:
+                        continue
                 project_id = mr["project_id"]
                 mr_iid = mr["iid"]
 

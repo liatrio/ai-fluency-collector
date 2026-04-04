@@ -424,8 +424,8 @@ def scan(
     click.echo()
 
     # 16–18. Per-week: pipeline pass rate + review signals → output file
-    review_scanner = ReviewScanner(client)
-    mr_scanner = MRScanner(client)
+    review_scanner = ReviewScanner(client, project_paths=team.projects)
+    mr_scanner = MRScanner(client, project_paths=team.projects)
     output_paths: list[str] = []
     total_signals_all = len(artifact_signals) + len(ci_signals) + len(member_signals)
 
