@@ -134,6 +134,22 @@ def test_invalid_gitlab_token(mock_client_cls, tmp_path, monkeypatch):
     assert "authentication failed" in result.output
 
 
+@patch("ai_fluency_collector.cli.GitLabClient")
+def test_gitlab_api_not_found(mock_client_cls, tmp_path, monkeypatch):
+    from ai_fluency_collector.gitlab_client import GitLabAuthError
+
+    monkeypatch.setenv("GITLAB_TOKEN", "test-token")
+    mock_client_cls.return_value.validate_token.side_effect = GitLabAuthError(
+        "GitLab API not reachable at https://gitlab.example.com. "
+        "Check that gitlab_url in your config points to a valid GitLab instance."
+    )
+    config_path = _write_valid_config(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(main, ["scan", "--config", config_path, "--period", "2026-W12"])
+    assert result.exit_code != 0
+    assert "not reachable" in result.output
+
+
 @patch("ai_fluency_collector.cli.MemberScanner")
 @patch("ai_fluency_collector.cli.GitLabClient")
 def test_member_scanning_in_output(mock_client_cls, mock_member_cls, tmp_path, monkeypatch):
