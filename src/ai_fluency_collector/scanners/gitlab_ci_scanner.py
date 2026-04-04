@@ -7,6 +7,7 @@ from datetime import date
 import yaml
 
 from ai_fluency_collector.gitlab_client import GitLabClient
+from ai_fluency_collector.scanners.utils import period_to_date_range
 
 # CI pattern definitions with IDs matching CI_SKILL_MAPPINGS in scoring.py
 CI_PATTERN_IDS = [
@@ -292,15 +293,6 @@ class PipelinePassResult:
     total_count: int
 
 
-def _period_to_date_range(period: str) -> tuple[str, str]:
-    """Convert YYYY-WNN to (start_date, end_date) as ISO 8601 date strings."""
-    year = int(period[:4])
-    week = int(period[6:])
-    start = date.fromisocalendar(year, week, 1)
-    end = date.fromisocalendar(year, week, 7)
-    return start.isoformat(), end.isoformat()
-
-
 class CIScanner:
     """Scans GitLab projects for CI pipeline patterns in .gitlab-ci.yml."""
 
@@ -428,7 +420,7 @@ class CIScanner:
             PipelinePassResult with pass_count and total_count.
             total_count is 0 when no pipelines exist for the period.
         """
-        start_date, end_date = _period_to_date_range(period)
+        start_date, end_date = period_to_date_range(period)
         pipelines = self.client.get_pipelines(
             project_path, updated_after=start_date, updated_before=end_date
         )
@@ -491,7 +483,7 @@ class CIScanner:
         if not patterns_to_check:
             return CIExecutionResult(pattern_stats={})
 
-        start_date, end_date = _period_to_date_range(period)
+        start_date, end_date = period_to_date_range(period)
         pipelines = self.client.get_pipelines(
             project_path, updated_after=start_date, updated_before=end_date
         )
@@ -539,7 +531,7 @@ class CIScanner:
         Returns:
             CoverageResult with mean coverage float, or None if no coverage jobs found.
         """
-        start_date, _ = _period_to_date_range(period)
+        start_date, _ = period_to_date_range(period)
         jobs = self.client.get_jobs(project_path, scope="success", updated_after=start_date)
 
         coverage_jobs = [j for j in jobs if j.get("coverage") is not None]

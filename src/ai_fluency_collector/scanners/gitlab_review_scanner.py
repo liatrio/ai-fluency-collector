@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date
 
 from ai_fluency_collector.gitlab_client import GitLabClient
+from ai_fluency_collector.scanners.utils import (
+    period_to_date_range,
+    project_name_from_mr,
+    short_name,
+)
 
 # AI co-author patterns detected in MR commit messages.
 # agentic=True → also counted toward im-supervised-agent (agentic tools only).
@@ -36,16 +40,9 @@ MR_AI_COAUTHOR_PATTERNS: list[dict] = [
 ]
 
 
-def _period_to_date_range(period: str) -> tuple[str, str]:
-    """Convert YYYY-WNN to (start_date, end_date) as ISO 8601 strings.
-
-    Start is Monday, end is Sunday of the given ISO week.
-    """
-    year = int(period[:4])
-    week = int(period[6:])
-    start = date.fromisocalendar(year, week, 1)
-    end = date.fromisocalendar(year, week, 7)
-    return start.isoformat(), end.isoformat()
+# Backward-compatible aliases — canonical implementations in scanners.utils
+_period_to_date_range = period_to_date_range
+_project_name_from_mr = project_name_from_mr
 
 
 @dataclass
@@ -63,23 +60,6 @@ class ReviewMetrics:
     """Per-project MR review metrics for scoring_context."""
     tool_breakdown: dict[str, int] = field(default_factory=dict)
     """Per-tool MR counts: {tool_name: mr_count}"""
-
-
-def _project_name_from_mr(mr: dict) -> str:
-    """Extract short project name from MR data (no URLs in output)."""
-    # Try references.full first (e.g. "group/project!123")
-    refs = mr.get("references", {})
-    full_ref = refs.get("full", "")
-    if full_ref and "!" in full_ref:
-        return full_ref.rsplit("!", 1)[0]
-    # Fallback: extract from web_url path (never expose the URL itself)
-    web_url = mr.get("web_url", "")
-    if web_url:
-        # https://gitlab.com/group/project/-/merge_requests/123
-        parts = web_url.split("/-/")[0].split("/")
-        if len(parts) >= 2:
-            return "/".join(parts[-2:])
-    return str(mr.get("project_id", "unknown"))
 
 
 class ReviewScanner:
@@ -109,7 +89,7 @@ class ReviewScanner:
             ReviewMetrics with aggregated team-level metrics. Rate fields are None
             if no MRs were found for that metric.
         """
-        start_date, end_date = _period_to_date_range(period)
+        start_date, end_date = period_to_date_range(period)
         usernames_set = set(usernames)
 
         # Authored MR aggregates (LGTM rate + self-review rate + co-author tags)
@@ -141,7 +121,7 @@ class ReviewScanner:
             )
 
             for mr in authored_mrs:
-                proj_name = _project_name_from_mr(mr)
+                proj_name = project_name_from_mr(mr)
                 # Filter to configured projects if set
                 if self._project_filter and proj_name.lower() not in self._project_filter:
                     continue
@@ -209,7 +189,7 @@ class ReviewScanner:
             for mr in reviewed_mrs:
                 # Filter to configured projects if set
                 if self._project_filter:
-                    rp = _project_name_from_mr(mr)
+                    rp = project_name_from_mr(mr)
                     if rp.lower() not in self._project_filter:
                         continue
                 project_id = mr["project_id"]
@@ -258,7 +238,7 @@ class ReviewScanner:
         short_projects = sorted(all_projects)
         proj_suffix = ""
         if short_projects:
-            short_names = [p.rsplit("/", 1)[-1] if "/" in p else p for p in short_projects]
+            short_names = [short_name(p) for p in short_projects]
             proj_suffix = f" (across {', '.join(short_names)})"
 
         evidence: dict[str, str] = {}
@@ -289,7 +269,7 @@ class ReviewScanner:
             repos_with_ai = sorted(p for p in project_ai_mrs if project_ai_mrs[p] > 0)
             ai_proj_suffix = ""
             if repos_with_ai:
-                short_ai = [p.rsplit("/", 1)[-1] if "/" in p else p for p in repos_with_ai]
+                short_ai = [short_name(p) for p in repos_with_ai]
                 ai_proj_suffix = f". Across: {', '.join(short_ai)}"
             evidence["mr_ai_coauthor_rate"] = (
                 f"{overall_pct}% of team-authored merged MRs have AI co-author "

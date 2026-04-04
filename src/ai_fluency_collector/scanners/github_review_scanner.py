@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date
 
 from ai_fluency_collector.github_client import GitHubClient
+from ai_fluency_collector.scanners.utils import period_to_date_range
 
 # AI co-author patterns — same as GitLab member scanner
 _CLAUDE_PATTERN = re.compile(r"co-authored-by:.*claude", re.IGNORECASE)
@@ -15,15 +15,6 @@ _CLAUDE_AGENT_PATTERN = re.compile(
     r"co-authored-by:.*claude.*code|generated with.*claude.*code",
     re.IGNORECASE,
 )
-
-
-def _period_to_date_range(period: str) -> tuple[str, str]:
-    """Convert YYYY-WNN to (start, end) ISO 8601 date strings (Mon–Sun)."""
-    year = int(period[:4])
-    week = int(period[6:])
-    start = date.fromisocalendar(year, week, 1)
-    end = date.fromisocalendar(year, week, 7)
-    return start.isoformat(), end.isoformat()
 
 
 def _repo_and_number_from_pr(item: dict) -> tuple[str, str, int] | None:
@@ -81,7 +72,7 @@ class GitHubReviewScanner:
         Returns:
             GitHubReviewMetrics with aggregated team-level metrics.
         """
-        start_date, end_date = _period_to_date_range(period)
+        start_date, end_date = period_to_date_range(period)
         usernames_set = set(usernames)
 
         # Authored PR aggregates

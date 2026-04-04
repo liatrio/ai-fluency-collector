@@ -5,10 +5,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from ai_fluency_collector.gitlab_client import GitLabClient
-from ai_fluency_collector.scanners.gitlab_review_scanner import (
-    MR_AI_COAUTHOR_PATTERNS,
-    _period_to_date_range,
-    _project_name_from_mr,
+from ai_fluency_collector.scanners.gitlab_review_scanner import MR_AI_COAUTHOR_PATTERNS
+from ai_fluency_collector.scanners.utils import (
+    period_to_date_range,
+    project_name_from_mr,
+    short_name,
 )
 
 
@@ -106,7 +107,7 @@ class MRScanner:
         Returns:
             MRMetrics with aggregated team-level metrics.
         """
-        start_date, end_date = _period_to_date_range(period)
+        start_date, end_date = period_to_date_range(period)
 
         pr_sizes: list[int] = []
         coding_times: list[float] = []
@@ -127,7 +128,7 @@ class MRScanner:
             for mr in authored_mrs:
                 # Filter to configured projects if set
                 if self._project_filter:
-                    mp = _project_name_from_mr(mr)
+                    mp = project_name_from_mr(mr)
                     if mp.lower() not in self._project_filter:
                         continue
                 project_id = mr["project_id"]
@@ -150,7 +151,7 @@ class MRScanner:
                 if not is_ai_attributed:
                     continue
 
-                repo_name = _project_name_from_mr(mr)
+                repo_name = project_name_from_mr(mr)
                 all_repos.add(repo_name)
                 repo_mr_counts[repo_name] = repo_mr_counts.get(repo_name, 0) + 1
 
@@ -174,7 +175,7 @@ class MRScanner:
         short_repos = sorted(all_repos)
         repo_suffix = ""
         if short_repos:
-            short_names = [r.rsplit("/", 1)[-1] if "/" in r else r for r in short_repos]
+            short_names = [short_name(r) for r in short_repos]
             repo_suffix = f" across {', '.join(short_names)}"
 
         # Build evidence
