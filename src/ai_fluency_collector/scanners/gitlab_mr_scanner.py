@@ -108,6 +108,7 @@ class MRScanner:
         pr_sizes: list[int] = []
         coding_times: list[float] = []
         # Per-repo tracking
+        repo_mr_counts: dict[str, int] = {}
         repo_pr_sizes: dict[str, list[int]] = {}
         repo_coding_times: dict[str, list[float]] = {}
         all_repos: set[str] = set()
@@ -143,6 +144,7 @@ class MRScanner:
 
                 repo_name = _project_name_from_mr(mr)
                 all_repos.add(repo_name)
+                repo_mr_counts[repo_name] = repo_mr_counts.get(repo_name, 0) + 1
 
                 # Collect PR size
                 size = _parse_changes_count(mr.get("changes_count"))
@@ -185,7 +187,7 @@ class MRScanner:
         for repo_name in all_repos:
             sizes = repo_pr_sizes.get(repo_name, [])
             times = repo_coding_times.get(repo_name, [])
-            entry: dict = {"count": len(sizes)}
+            entry: dict = {"count": repo_mr_counts.get(repo_name, 0)}
             if sizes:
                 entry["median_lines"] = round(statistics.median(sizes))
             if times:

@@ -334,8 +334,12 @@ def _artifact_breakdown(
         if missing_projects:
             missing_detail = f" Missing from: {_proj_list(missing_projects)}."
 
+        # Skip aggregate location when found_detail already has per-project branch info
+        effective_location = "" if found_detail else location
+
         return (
-            f"{name} found in {total_found} of {num_projects} projects{found_detail}{location}."
+            f"{name} found in {total_found} of {num_projects} projects"
+            f"{found_detail}{effective_location}."
             f"{missing_detail}"
             f"{' To improve: ' + hint + '.' if hint else ''}"
         ).strip()
