@@ -387,7 +387,6 @@ class CIScanner:
         """
         from ai_fluency_collector.scanners.gitlab_artifact_scanner import (
             DEFAULT_BRANCH_WEIGHT,
-            FEATURE_BRANCH_WEIGHT,
             _get_active_branches,
         )
 
@@ -398,18 +397,20 @@ class CIScanner:
         if not active_branches:
             active_branches = [{"name": "HEAD", "weight": DEFAULT_BRANCH_WEIGHT}]
 
-        results: dict[str, dict] = {pid: {"weight": 0.0, "branch": None} for pid in CI_PATTERN_IDS}
+        results: dict[str, dict] = {
+            pid: {"weight": 0.0, "branch": None, "branch_count": 0, "branches": []}
+            for pid in CI_PATTERN_IDS
+        }
 
         for branch in active_branches:
             branch_results = self._scan_branch(project_path, branch["name"])
             for pid, found in branch_results.items():
-                if found and branch["weight"] > results[pid]["weight"]:
-                    results[pid]["weight"] = branch["weight"]
-                    results[pid]["branch"] = branch["name"]
-
-            # If all patterns already at max weight, stop early
-            if all(v["weight"] >= FEATURE_BRANCH_WEIGHT for v in results.values()):
-                break
+                if found:
+                    results[pid]["branches"].append(branch["name"])
+                    results[pid]["branch_count"] += 1
+                    if branch["weight"] > results[pid]["weight"]:
+                        results[pid]["weight"] = branch["weight"]
+                        results[pid]["branch"] = branch["name"]
 
         return results
 

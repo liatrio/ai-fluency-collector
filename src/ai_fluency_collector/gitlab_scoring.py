@@ -253,6 +253,7 @@ def _artifact_breakdown(
     feature_projects: list[str] | None = None,
     missing_projects: list[str] | None = None,
     branch_names: dict[str, str] | None = None,
+    branch_counts: dict[str, int] | None = None,
 ) -> str:
     """Build a human-readable breakdown sentence for an artifact signal.
 
@@ -278,8 +279,12 @@ def _artifact_breakdown(
     def _proj_with_branch(p: str, branch_type: str) -> str:
         """Format project name with branch info, using actual name if available."""
         short = _short_name(p)
+        count = branch_counts.get(p, 0) if branch_counts else 0
         if branch_names and p in branch_names:
-            return f"{short} ({branch_names[p]})"
+            bname = branch_names[p]
+            if count > 1:
+                return f"{short} ({count} branches, e.g. {bname})"
+            return f"{short} ({bname})"
         return f"{short} ({branch_type})"
 
     if total_found == num_projects:
@@ -905,8 +910,10 @@ def calculate_scores(
         artifact_default_projects: dict[str, list[str]] = defaultdict(list)
         artifact_feature_projects: dict[str, list[str]] = defaultdict(list)
         artifact_missing_projects: dict[str, list[str]] = defaultdict(list)
-        # Track actual branch names per project per artifact
+        # Track actual branch names and counts per project per artifact
         artifact_branch_names: dict[str, dict[str, str]] = defaultdict(dict)
+        artifact_branch_counts: dict[str, dict[str, int]] = defaultdict(dict)
+        artifact_all_branches: dict[str, dict[str, list[str]]] = defaultdict(dict)
 
         for idx, project_result in enumerate(scan_results):
             proj_name = project_names[idx] if project_names and idx < len(project_names) else None
@@ -918,9 +925,13 @@ def calculate_scores(
                 if isinstance(raw, dict):
                     value = raw.get("weight", 0.0)
                     branch_name = raw.get("branch")
+                    branch_count = raw.get("branch_count", 1 if branch_name else 0)
+                    all_branches = raw.get("branches", [])
                 else:
                     value = raw
                     branch_name = None
+                    branch_count = 0
+                    all_branches = []
                 if isinstance(value, (int, float)) and value > 0:
                     found_weight += m["weight"] * value
                     artifact_counts[aid] += 1
@@ -930,12 +941,20 @@ def calculate_scores(
                             artifact_feature_projects[aid].append(proj_name)
                             if branch_name:
                                 artifact_branch_names[aid][proj_name] = branch_name
+                            if branch_count:
+                                artifact_branch_counts[aid][proj_name] = branch_count
+                            if all_branches:
+                                artifact_all_branches[aid][proj_name] = all_branches
                     elif value >= DEFAULT_BRANCH_WEIGHT:
                         default_counts[aid] += 1
                         if proj_name:
                             artifact_default_projects[aid].append(proj_name)
                             if branch_name:
                                 artifact_branch_names[aid][proj_name] = branch_name
+                            if branch_count:
+                                artifact_branch_counts[aid][proj_name] = branch_count
+                            if all_branches:
+                                artifact_all_branches[aid][proj_name] = all_branches
                 elif value is True:
                     found_weight += m["weight"]
                     artifact_counts[aid] += 1
@@ -996,24 +1015,35 @@ def calculate_scores(
                     feature_projects=artifact_feature_projects.get(aid),
                     missing_projects=artifact_missing_projects.get(aid),
                     branch_names=artifact_branch_names.get(aid),
+                    branch_counts=artifact_branch_counts.get(aid),
                 )
             )
 
             # Build per_project data for this artifact
             if project_names:
-                branch_names = artifact_branch_names.get(aid, {})
+                bnames = artifact_branch_names.get(aid, {})
+                bcounts = artifact_branch_counts.get(aid, {})
+                all_br = artifact_all_branches.get(aid, {})
                 for p in artifact_default_projects.get(aid, []):
                     per_project.setdefault(p, {})["found"] = True
                     per_project[p]["branch"] = "default"
                     per_project[p]["weight"] = DEFAULT_BRANCH_WEIGHT
-                    if p in branch_names:
-                        per_project[p]["branch_name"] = branch_names[p]
+                    if p in bnames:
+                        per_project[p]["branch_name"] = bnames[p]
+                    if p in bcounts:
+                        per_project[p]["branch_count"] = bcounts[p]
+                    if p in all_br:
+                        per_project[p]["branches"] = all_br[p]
                 for p in artifact_feature_projects.get(aid, []):
                     per_project.setdefault(p, {})["found"] = True
                     per_project[p]["branch"] = "feature"
                     per_project[p]["weight"] = FEATURE_BRANCH_WEIGHT
-                    if p in branch_names:
-                        per_project[p]["branch_name"] = branch_names[p]
+                    if p in bnames:
+                        per_project[p]["branch_name"] = bnames[p]
+                    if p in bcounts:
+                        per_project[p]["branch_count"] = bcounts[p]
+                    if p in all_br:
+                        per_project[p]["branches"] = all_br[p]
                 for p in artifact_missing_projects.get(aid, []):
                     per_project.setdefault(p, {})["found"] = False
 

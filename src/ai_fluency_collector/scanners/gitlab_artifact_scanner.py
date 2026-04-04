@@ -119,11 +119,11 @@ class ArtifactScanner:
     def scan_project(self, project_path: str) -> dict[str, dict]:
         """Scan a project across all active branches for artifact types.
 
-        Returns a dict of {artifact_id: {"weight": float, "branch": str|None}}
-        where weight is the highest branch weight where the artifact was found
-        (0.0 if not found). Default branch = 0.5, active feature branch = 0.8.
-        branch is the name of the branch with the highest weight, or None if
-        the artifact was not found.
+        Returns a dict of {artifact_id: info} where info contains:
+            weight: float - highest branch weight (0.0 if not found)
+            branch: str|None - name of the best-weight branch
+            branch_count: int - total number of branches where artifact was found
+            branches: list[str] - all branch names where artifact was found
 
         Raises GitLabAccessError if the project is inaccessible.
         """
@@ -139,13 +139,17 @@ class ArtifactScanner:
         for artifact in ARTIFACT_DEFINITIONS:
             best_weight = 0.0
             best_branch: str | None = None
+            found_branches: list[str] = []
             for branch in active_branches:
                 if self._check_artifact_on_branch(project_path, artifact, branch["name"]):
+                    found_branches.append(branch["name"])
                     if branch["weight"] > best_weight:
                         best_weight = branch["weight"]
                         best_branch = branch["name"]
-                    # If we already found the max possible weight, stop early
-                    if best_weight >= FEATURE_BRANCH_WEIGHT:
-                        break
-            results[artifact["id"]] = {"weight": best_weight, "branch": best_branch}
+            results[artifact["id"]] = {
+                "weight": best_weight,
+                "branch": best_branch,
+                "branch_count": len(found_branches),
+                "branches": found_branches,
+            }
         return results
