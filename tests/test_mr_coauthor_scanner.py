@@ -252,7 +252,6 @@ def _metrics(ai_rate, agentic_rate, total=5):
     )
 
 
-
 def test_scoring_im_chat_from_ai_coauthor_rate():
     """im-chat score reflects overall AI co-author rate."""
     m = _metrics(ai_rate=0.34, agentic_rate=0.22)

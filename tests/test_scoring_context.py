@@ -1,4 +1,5 @@
 """Tests that scoring_context is present and correct on all signal types."""
+
 from __future__ import annotations
 
 from ai_fluency_collector.gitlab_scoring import (
@@ -316,3 +317,182 @@ def test_github_artifact_scoring_context_present():
     assert "max_from_this_signal" in ctx
     assert ctx["max_from_this_signal"] == 100
     assert "tiered" in ctx["breakdown"]
+
+
+# ── Enhanced evidence with project names ─────────────────────────────────────
+
+
+def test_artifact_evidence_includes_project_names():
+    """Evidence includes short project names when project_names are provided."""
+    results = [
+        {"claude-md": FEATURE_BRANCH_WEIGHT},
+        {"claude-md": DEFAULT_BRANCH_WEIGHT},
+        {"claude-md": 0.0},
+    ]
+    project_names = ["group/platform-api", "group/frontend-app", "group/data-pipeline"]
+    signals = calculate_scores(results, ARTIFACT_SKILL_MAPPINGS, project_names=project_names)
+    cq = next(s for s in signals if s["skill_id"] == "cq-context")
+    assert "platform-api" in cq["evidence"]
+    assert "frontend-app" in cq["evidence"]
+    # Missing project should not appear in evidence (only in breakdown)
+    assert "group/" not in cq["evidence"]  # only short names
+
+
+def test_artifact_per_project_in_scoring_context():
+    """scoring_context includes per_project when project_names provided."""
+    results = [
+        {"claude-md": FEATURE_BRANCH_WEIGHT},
+        {"claude-md": 0.0},
+    ]
+    project_names = ["group/platform-api", "group/data-pipeline"]
+    signals = calculate_scores(results, ARTIFACT_SKILL_MAPPINGS, project_names=project_names)
+    cq = next(s for s in signals if s["skill_id"] == "cq-context")
+    ctx = cq["scoring_context"]
+    assert "per_project" in ctx
+    assert "group/platform-api" in ctx["per_project"]
+    assert ctx["per_project"]["group/platform-api"]["found"] is True
+    assert ctx["per_project"]["group/platform-api"]["branch"] == "feature"
+    assert "group/data-pipeline" in ctx["per_project"]
+    assert ctx["per_project"]["group/data-pipeline"]["found"] is False
+
+
+def test_artifact_breakdown_includes_project_names():
+    """Breakdown mentions specific project names."""
+    results = [
+        {"claude-md": DEFAULT_BRANCH_WEIGHT},
+        {"claude-md": 0.0},
+    ]
+    project_names = ["group/platform-api", "group/data-pipeline"]
+    signals = calculate_scores(results, ARTIFACT_SKILL_MAPPINGS, project_names=project_names)
+    cq = next(s for s in signals if s["skill_id"] == "cq-context")
+    breakdown = cq["scoring_context"]["breakdown"]
+    assert "platform-api" in breakdown
+    assert "data-pipeline" in breakdown
+
+
+def test_artifact_no_per_project_without_names():
+    """scoring_context omits per_project when project_names not provided."""
+    results = [{"claude-md": FEATURE_BRANCH_WEIGHT}]
+    signals = calculate_scores(results, ARTIFACT_SKILL_MAPPINGS)
+    cq = next(s for s in signals if s["skill_id"] == "cq-context")
+    assert "per_project" not in cq["scoring_context"]
+
+
+def test_pipeline_evidence_includes_project_names():
+    """Pipeline evidence includes project names."""
+    results = [
+        PipelinePassResult(pass_count=8, total_count=10),
+        PipelinePassResult(pass_count=5, total_count=5),
+    ]
+    signals = calculate_pipeline_scores(
+        results,
+        CI_PIPELINE_SKILL_MAPPINGS,
+        project_names=["group/platform-api", "group/frontend-app"],
+    )
+    assert len(signals) > 0
+    assert "platform-api" in signals[0]["evidence"]
+    assert "frontend-app" in signals[0]["evidence"]
+
+
+def test_pipeline_per_project_in_scoring_context():
+    """Pipeline scoring_context includes per_project."""
+    results = [
+        PipelinePassResult(pass_count=8, total_count=10),
+        PipelinePassResult(pass_count=0, total_count=0),
+    ]
+    signals = calculate_pipeline_scores(
+        results,
+        CI_PIPELINE_SKILL_MAPPINGS,
+        project_names=["group/platform-api", "group/data-pipeline"],
+    )
+    ctx = signals[0]["scoring_context"]
+    assert "per_project" in ctx
+    assert "group/platform-api" in ctx["per_project"]
+    assert ctx["per_project"]["group/platform-api"]["total"] == 10
+    # data-pipeline had 0 pipelines, should not appear in per_project
+    assert "group/data-pipeline" not in ctx["per_project"]
+
+
+def test_coverage_evidence_includes_project_names():
+    """Coverage evidence includes project names."""
+    results = [CoverageResult(coverage=75.0)]
+    signals = calculate_coverage_scores(
+        results,
+        None,
+        COVERAGE_SKILL_MAPPINGS,
+        project_names=["group/platform-api"],
+    )
+    assert "platform-api" in signals[0]["evidence"]
+
+
+def test_member_evidence_includes_repo_names():
+    """Member evidence includes discovered repo names."""
+    from ai_fluency_collector.scanners.gitlab_member_scanner import MemberResult
+
+    results = [
+        MemberResult(
+            "alice",
+            repos_discovered=2,
+            ai_coauthor_counts={"coauthor-claude": 5},
+            repo_coauthor_counts={
+                "group/platform-api": {"coauthor-claude": 3},
+                "group/frontend-app": {"coauthor-claude": 2},
+            },
+        ),
+    ]
+    signals = calculate_member_scores(results, MEMBER_SKILL_MAPPINGS)
+    cli = next(s for s in signals if s["skill_id"] == "im-cli-agent")
+    assert "platform-api" in cli["evidence"]
+    assert "frontend-app" in cli["evidence"]
+    ctx = cli["scoring_context"]
+    assert "repos_with_activity" in ctx
+    assert "total_commits" in ctx
+    assert ctx["total_commits"] == 5
+    assert ctx["members_with_activity"] == 1
+    assert ctx["total_members"] == 1
+
+
+def test_no_urls_in_evidence():
+    """Security: evidence must not contain URLs to client systems."""
+    results = [{"claude-md": FEATURE_BRANCH_WEIGHT}]
+    project_names = ["group/platform-api"]
+    signals = calculate_scores(results, ARTIFACT_SKILL_MAPPINGS, project_names=project_names)
+    for s in signals:
+        assert "https://" not in s["evidence"]
+        assert "http://" not in s["evidence"]
+        assert "gitlab.com" not in s["evidence"]
+        ctx_str = str(s["scoring_context"])
+        assert "https://" not in ctx_str
+        assert "http://" not in ctx_str
+
+
+def test_github_artifact_per_repo_in_scoring_context():
+    """GitHub artifact scoring_context includes per_repo."""
+    from ai_fluency_collector.github_client import GitHubClient
+    from ai_fluency_collector.scanners.github_artifact_scanner import GitHubArtifactScanner
+
+    client = GitHubClient("test-token")
+    scanner = GitHubArtifactScanner(client)
+    scanner.scan_repo = lambda owner, repo: {"ks-patterns": 75 if repo == "repo1" else 0}
+    signals = scanner.scan_repos(["org/repo1", "org/repo2"])
+
+    assert len(signals) == 1
+    ctx = signals[0]["scoring_context"]
+    assert "per_repo" in ctx
+    assert ctx["per_repo"]["org/repo1"]["found"] is True
+    assert ctx["per_repo"]["org/repo1"]["score"] == 75
+    assert ctx["per_repo"]["org/repo2"]["found"] is False
+    assert ctx["per_repo"]["org/repo2"]["score"] == 0
+
+
+def test_github_artifact_evidence_includes_missing_repos():
+    """GitHub artifact evidence includes missing repos."""
+    from ai_fluency_collector.github_client import GitHubClient
+    from ai_fluency_collector.scanners.github_artifact_scanner import GitHubArtifactScanner
+
+    client = GitHubClient("test-token")
+    scanner = GitHubArtifactScanner(client)
+    scanner.scan_repo = lambda owner, repo: {"ks-patterns": 75 if repo == "repo1" else 0}
+    signals = scanner.scan_repos(["org/repo1", "org/repo2"])
+
+    assert "Missing: org/repo2" in signals[0]["evidence"]

@@ -113,17 +113,36 @@ class GitHubArtifactScanner:
             if score <= 0:
                 continue
             found_in = skill_repos.get(skill_id, [])
+            missing = [r for r in repos if r not in found_in]
             evidence = f"Found in {len(found_in)}/{num_repos} repos: {', '.join(found_in)}"
+            if missing:
+                evidence += f". Missing: {', '.join(missing)}"
             breakdown = (
                 f"{evidence}; tiered score {score} "
                 f"(depth-based: higher scores reflect richer content or more files)"
             )
-            signals.append({
-                "skill_id": skill_id,
-                "score": score,
-                "evidence": evidence,
-                "scoring_context": {"breakdown": breakdown, "max_from_this_signal": 100},
-            })
+
+            # Build per_repo scoring_context
+            per_repo: dict[str, dict] = {}
+            for repo_str, scores in all_repo_scores:
+                repo_score = scores.get(skill_id, 0)
+                per_repo[repo_str] = {
+                    "found": repo_score > 0,
+                    "score": repo_score,
+                }
+
+            signals.append(
+                {
+                    "skill_id": skill_id,
+                    "score": score,
+                    "evidence": evidence,
+                    "scoring_context": {
+                        "breakdown": breakdown,
+                        "max_from_this_signal": 100,
+                        "per_repo": per_repo,
+                    },
+                }
+            )
 
         return signals
 
@@ -267,13 +286,10 @@ class GitHubArtifactScanner:
         if githooks:
             for entry in githooks:
                 if entry.get("type") == "file":
-                    hook_content = self.client.get_file_content(
-                        owner, repo, entry.get("path", "")
-                    )
+                    hook_content = self.client.get_file_content(owner, repo, entry.get("path", ""))
                     if hook_content:
                         security_matches |= set(
-                            m.group(0).lower()
-                            for m in _SECURITY_SCANNERS.finditer(hook_content)
+                            m.group(0).lower() for m in _SECURITY_SCANNERS.finditer(hook_content)
                         )
 
         if len(security_matches) >= 2:
@@ -300,18 +316,14 @@ class GitHubArtifactScanner:
             if scripts and workflow_score < 80:
                 for entry in scripts:
                     if entry.get("type") == "file":
-                        content = self.client.get_file_content(
-                            owner, repo, entry.get("path", "")
-                        )
+                        content = self.client.get_file_content(owner, repo, entry.get("path", ""))
                         if content and _AI_WORKFLOW_PATTERNS.search(content):
                             workflow_score = max(workflow_score, 80)
                             break
 
         # Check .claude/ for hooks/automation config
         if workflow_score < 80:
-            claude_settings = self.client.get_file_content(
-                owner, repo, ".claude/settings.json"
-            )
+            claude_settings = self.client.get_file_content(owner, repo, ".claude/settings.json")
             if claude_settings:
                 try:
                     data = json.loads(claude_settings)

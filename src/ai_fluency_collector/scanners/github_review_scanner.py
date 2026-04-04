@@ -51,6 +51,8 @@ class GitHubReviewMetrics:
     self_review_rate: float | None
     total_authored_prs: int
     evidence: dict[str, str] = field(default_factory=dict)
+    per_repo: dict[str, dict] = field(default_factory=dict)
+    """Per-repo PR review metrics for scoring_context."""
 
 
 class GitHubReviewScanner:
@@ -87,6 +89,11 @@ class GitHubReviewScanner:
         ai_coauthor_count = 0
         ai_agent_count = 0
 
+        # Per-repo tracking
+        repo_total: dict[str, int] = {}
+        repo_ai: dict[str, int] = {}
+        all_repos: set[str] = set()
+
         # Reviewer aggregates (comment depth)
         total_files_changed = 0
         files_with_comment = 0
@@ -102,6 +109,9 @@ class GitHubReviewScanner:
                     continue
                 owner, repo, number = parsed
                 total_authored += 1
+                repo_str = f"{owner}/{repo}"
+                all_repos.add(repo_str)
+                repo_total[repo_str] = repo_total.get(repo_str, 0) + 1
                 author_login = pr.get("user", {}).get("login", username)
 
                 # Inline review comments → LGTM detection
@@ -143,6 +153,7 @@ class GitHubReviewScanner:
                         has_ai = True
                 if has_ai:
                     ai_coauthor_count += 1
+                    repo_ai[repo_str] = repo_ai.get(repo_str, 0) + 1
                 if has_agent:
                     ai_agent_count += 1
 
@@ -181,29 +192,47 @@ class GitHubReviewScanner:
         review_depth = files_with_comment / total_files_changed if total_files_changed > 0 else None
 
         # ── Team-level evidence (no individual attribution) ───────────────────
+        sorted_repos = sorted(all_repos)
+        repo_suffix = ""
+        if sorted_repos:
+            repo_suffix = f" (across {', '.join(sorted_repos)})"
+
         evidence: dict[str, str] = {}
         if lgtm_rate is not None:
             evidence["lgtm_without_comment"] = (
-                f"{lgtm_count}/{total_authored} team-authored PRs approved without review comments"
+                f"{lgtm_count}/{total_authored} team-authored PRs "
+                f"approved without review comments{repo_suffix}"
             )
         if review_depth is not None:
             pct = round(review_depth * 100)
             evidence["review_comment_depth"] = (
-                f"Team reviewers commented on {pct}% of changed files on average"
+                f"Team reviewers commented on {pct}% of changed files on average{repo_suffix}"
             )
         if ai_coauthor_rate is not None:
             pct = round(ai_coauthor_rate * 100)
-            evidence["ai_coauthor_rate"] = f"{pct}% of team-authored PRs contain AI co-author tags"
+            evidence["ai_coauthor_rate"] = (
+                f"{pct}% of team-authored PRs contain AI co-author tags{repo_suffix}"
+            )
         if ai_agent_rate is not None:
             pct = round(ai_agent_rate * 100)
             evidence["ai_agent_coauthor_rate"] = (
-                f"{pct}% of team-authored PRs contain Claude Code agentic co-author tags"
+                f"{pct}% of team-authored PRs contain Claude Code "
+                f"agentic co-author tags{repo_suffix}"
             )
         if self_review_rate is not None:
             pct = round(self_review_rate * 100)
             evidence["self_review_rate"] = (
-                f"{pct}% of team-authored PRs included author self-review before approval"
+                f"{pct}% of team-authored PRs included author self-review "
+                f"before approval{repo_suffix}"
             )
+
+        # ── Build per_repo metadata ──────────────────────────────────────────
+        per_repo: dict[str, dict] = {}
+        for repo_str in all_repos:
+            per_repo[repo_str] = {
+                "total": repo_total.get(repo_str, 0),
+                "ai": repo_ai.get(repo_str, 0),
+            }
 
         return GitHubReviewMetrics(
             lgtm_rate=lgtm_rate,
@@ -213,4 +242,5 @@ class GitHubReviewScanner:
             self_review_rate=self_review_rate,
             total_authored_prs=total_authored,
             evidence=evidence,
+            per_repo=per_repo,
         )

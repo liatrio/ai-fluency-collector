@@ -31,6 +31,8 @@ class MemberResult:
     username: str
     repos_discovered: int = 0
     ai_coauthor_counts: dict[str, int] = field(default_factory=dict)
+    repo_coauthor_counts: dict[str, dict[str, int]] = field(default_factory=dict)
+    """Per-repo AI coauthor commit counts: {repo_name: {pattern_id: count}}"""
 
 
 class MemberScanner:
@@ -101,6 +103,9 @@ class MemberScanner:
 
         for repo in repos:
             counts = self._scan_commits_for_coauthors(repo["id"], username)
+            if counts:
+                repo_name = repo.get("path_with_namespace", repo.get("name", str(repo["id"])))
+                result.repo_coauthor_counts[repo_name] = counts
             for pattern_id, count in counts.items():
                 result.ai_coauthor_counts[pattern_id] = (
                     result.ai_coauthor_counts.get(pattern_id, 0) + count

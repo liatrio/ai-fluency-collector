@@ -59,6 +59,25 @@ class ReviewMetrics:
     mr_ai_coauthor_rate: float | None = None
     mr_agentic_coauthor_rate: float | None = None
     evidence: dict[str, str] = field(default_factory=dict)
+    per_project: dict[str, dict] = field(default_factory=dict)
+    """Per-project MR review metrics for scoring_context."""
+
+
+def _project_name_from_mr(mr: dict) -> str:
+    """Extract short project name from MR data (no URLs in output)."""
+    # Try references.full first (e.g. "group/project!123")
+    refs = mr.get("references", {})
+    full_ref = refs.get("full", "")
+    if full_ref and "!" in full_ref:
+        return full_ref.rsplit("!", 1)[0]
+    # Fallback: extract from web_url path (never expose the URL itself)
+    web_url = mr.get("web_url", "")
+    if web_url:
+        # https://gitlab.com/group/project/-/merge_requests/123
+        parts = web_url.split("/-/")[0].split("/")
+        if len(parts) >= 2:
+            return "/".join(parts[-2:])
+    return str(mr.get("project_id", "unknown"))
 
 
 class ReviewScanner:
@@ -96,6 +115,12 @@ class ReviewScanner:
         # Counts MRs (not commits) that had at least one commit with each tool's tag
         tool_mr_counts: dict[str, int] = {p["id"]: 0 for p in MR_AI_COAUTHOR_PATTERNS}
 
+        # Per-project tracking
+        project_total: dict[str, int] = {}
+        project_lgtm: dict[str, int] = {}
+        project_ai_mrs: dict[str, int] = {}
+        all_projects: set[str] = set()
+
         # Reviewer aggregates (comment depth)
         total_files_changed = 0
         files_with_discussion = 0
@@ -113,6 +138,9 @@ class ReviewScanner:
                 total_authored += 1
                 project_id = mr["project_id"]
                 mr_iid = mr["iid"]
+                proj_name = _project_name_from_mr(mr)
+                all_projects.add(proj_name)
+                project_total[proj_name] = project_total.get(proj_name, 0) + 1
 
                 # AI co-author tag detection in MR commits
                 commits = self.client.get_mr_commits(project_id, mr_iid)
@@ -131,6 +159,7 @@ class ReviewScanner:
                     tool_mr_counts[tool_id] += 1
                 if mr_has_any_ai:
                     mrs_with_any_ai_tag += 1
+                    project_ai_mrs[proj_name] = project_ai_mrs.get(proj_name, 0) + 1
                 if mr_has_agentic:
                     mrs_with_agentic_tag += 1
 
@@ -140,6 +169,7 @@ class ReviewScanner:
                 # LGTM rate: zero non-system notes on this MR
                 if not non_system_notes:
                     lgtm_count += 1
+                    project_lgtm[proj_name] = project_lgtm.get(proj_name, 0) + 1
 
                 # Self-review: author left a note before the first approval.
                 # Approvals show up as system notes with body "approved this merge request".
@@ -210,20 +240,29 @@ class ReviewScanner:
         )
 
         # ── Build team-level evidence strings (no individual attribution) ────
+        # Short project names for evidence (no URLs)
+        short_projects = sorted(all_projects)
+        proj_suffix = ""
+        if short_projects:
+            short_names = [p.rsplit("/", 1)[-1] if "/" in p else p for p in short_projects]
+            proj_suffix = f" (across {', '.join(short_names)})"
+
         evidence: dict[str, str] = {}
         if lgtm_rate is not None:
             evidence["lgtm_without_comment"] = (
-                f"{lgtm_count}/{total_authored} team-authored MRs approved without review comments"
+                f"{lgtm_count}/{total_authored} team-authored MRs "
+                f"approved without review comments{proj_suffix}"
             )
         if review_depth is not None:
             pct = round(review_depth * 100)
             evidence["review_comment_depth"] = (
-                f"Team reviewers commented on {pct}% of changed files on average"
+                f"Team reviewers commented on {pct}% of changed files on average{proj_suffix}"
             )
         if self_review_rate is not None:
             pct = round(self_review_rate * 100)
             evidence["self_review_rate"] = (
-                f"{pct}% of team-authored MRs included author self-review before approval"
+                f"{pct}% of team-authored MRs included author self-review "
+                f"before approval{proj_suffix}"
             )
         if mr_ai_coauthor_rate is not None:
             overall_pct = round(mr_ai_coauthor_rate * 100)
@@ -233,10 +272,26 @@ class ReviewScanner:
                 if tool_mr_counts[p["id"]] > 0
             ]
             breakdown = f" ({', '.join(tool_parts)})" if tool_parts else ""
+            repos_with_ai = sorted(p for p in project_ai_mrs if project_ai_mrs[p] > 0)
+            ai_proj_suffix = ""
+            if repos_with_ai:
+                short_ai = [p.rsplit("/", 1)[-1] if "/" in p else p for p in repos_with_ai]
+                ai_proj_suffix = f". Across: {', '.join(short_ai)}"
             evidence["mr_ai_coauthor_rate"] = (
-                f"{overall_pct}% of team-authored merged MRs have AI co-author tags{breakdown}"
+                f"{overall_pct}% of team-authored merged MRs have AI co-author "
+                f"tags{breakdown}{ai_proj_suffix}"
             )
             evidence["mr_agentic_coauthor_rate"] = evidence["mr_ai_coauthor_rate"]
+
+        # ── Build per_project metadata ──────────────────────────────────────
+        per_project: dict[str, dict] = {}
+        for proj_name in all_projects:
+            total = project_total.get(proj_name, 0)
+            per_project[proj_name] = {
+                "total": total,
+                "lgtm": project_lgtm.get(proj_name, 0),
+                "ai_mrs": project_ai_mrs.get(proj_name, 0),
+            }
 
         return ReviewMetrics(
             lgtm_rate=lgtm_rate,
@@ -246,4 +301,5 @@ class ReviewScanner:
             mr_ai_coauthor_rate=mr_ai_coauthor_rate,
             mr_agentic_coauthor_rate=mr_agentic_coauthor_rate,
             evidence=evidence,
+            per_project=per_project,
         )

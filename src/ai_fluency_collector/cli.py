@@ -354,7 +354,9 @@ def scan(
             click.echo(f"  {project}: no artifacts found")
 
     # 11. Calculate artifact scores
-    artifact_signals = calculate_scores(all_artifact_results, ARTIFACT_SKILL_MAPPINGS)
+    artifact_signals = calculate_scores(
+        all_artifact_results, ARTIFACT_SKILL_MAPPINGS, project_names=team.projects
+    )
     click.echo(f"  → {len(artifact_signals)} artifact signals detected")
     click.echo()
 
@@ -378,7 +380,7 @@ def scan(
             click.echo(f"  {project}: no CI patterns found")
 
     # 13. Calculate CI scores
-    ci_signals = calculate_scores(all_ci_results, CI_SKILL_MAPPINGS)
+    ci_signals = calculate_scores(all_ci_results, CI_SKILL_MAPPINGS, project_names=team.projects)
     click.echo(f"  → {len(ci_signals)} CI signals detected")
     click.echo()
 
@@ -431,7 +433,9 @@ def scan(
             raise click.ClickException(str(e)) from e
         for project in team.projects:
             click.echo(f"  Scanning pipelines for {project}...")
-        pipeline_signals = calculate_pipeline_scores(pipeline_results, CI_PIPELINE_SKILL_MAPPINGS)
+        pipeline_signals = calculate_pipeline_scores(
+            pipeline_results, CI_PIPELINE_SKILL_MAPPINGS, project_names=team.projects
+        )
         total_pipelines = sum(r.total_count for r in pipeline_results)
         click.echo(f"  {total_pipelines} pipelines analyzed across projects")
         click.echo(f"  → {len(pipeline_signals)} pipeline signals detected")
@@ -457,7 +461,10 @@ def scan(
             current_coverage.append(curr)
             prior_coverage.append(prior)
         coverage_signals = calculate_coverage_scores(
-            current_coverage, prior_coverage, COVERAGE_SKILL_MAPPINGS
+            current_coverage,
+            prior_coverage,
+            COVERAGE_SKILL_MAPPINGS,
+            project_names=team.projects,
         )
         click.echo(f"  → {len(coverage_signals)} coverage signals detected")
 
@@ -472,7 +479,7 @@ def scan(
             raise click.ClickException(str(e)) from e
 
         execution_signals = calculate_ci_execution_scores(
-            execution_results, CI_EXECUTION_SKILL_MAPPINGS
+            execution_results, CI_EXECUTION_SKILL_MAPPINGS, project_names=team.projects
         )
         configured_count = sum(len(r.pattern_stats) for r in execution_results)
         running_count = sum(

@@ -44,6 +44,8 @@ def calculate_github_review_scores(metrics, mappings: dict) -> list[dict]:
         "self_review_rate": metrics.self_review_rate,
     }
 
+    per_repo = getattr(metrics, "per_repo", None)
+
     signals: list[dict] = []
     for metric_key, skill_maps in mappings.items():
         value = metric_values.get(metric_key)
@@ -54,11 +56,16 @@ def calculate_github_review_scores(metrics, mappings: dict) -> list[dict]:
             if score <= 0:
                 continue
             evidence = metrics.evidence.get(metric_key, "detected")
-            signals.append({
-                "skill_id": m["skill_id"],
-                "score": score,
-                "evidence": evidence,
-                "scoring_context": _rate_context(evidence),
-            })
+            ctx = _rate_context(evidence)
+            if per_repo:
+                ctx["per_repo"] = per_repo
+            signals.append(
+                {
+                    "skill_id": m["skill_id"],
+                    "score": score,
+                    "evidence": evidence,
+                    "scoring_context": ctx,
+                }
+            )
 
     return signals
